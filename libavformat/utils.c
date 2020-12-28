@@ -450,6 +450,27 @@ static int add_to_pktbuf(AVPacketList **packet_buffer, AVPacket *pkt,
     return 0;
 }
 
+void add_to_pktbuf_ijk(AVFormatContext *s, AVPacket *pkt)
+{
+    AVPacketList **packet_buffer = &s->internal->packet_buffer;    
+    AVPacketList **plast_pktl  = &s->internal->raw_packet_buffer_end;  
+    AVPacketList *pktl = (AVPacketList *)av_mallocz(sizeof(AVPacketList));
+    if (!pktl)
+        return NULL;
+
+    if (*packet_buffer)
+        (*plast_pktl)->next = pktl;
+    else
+        *packet_buffer = pktl;
+
+    /* Add the packet in the buffered packet list. */
+    *plast_pktl = pktl;
+    pktl->pkt   = *pkt;
+    return &pktl->pkt;
+}
+
+
+
 int avformat_queue_attached_pictures(AVFormatContext *s)
 {
     int i, ret;
@@ -3523,7 +3544,7 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
     int *missing_streams = av_opt_ptr(ic->iformat->priv_class, ic->priv_data, "missing_streams");
 
     flush_codecs = probesize > 0;
-
+	int video_index = 0;
     av_opt_set(ic, "skip_clear", "1", AV_OPT_SEARCH_CHILDREN);
 
     max_stream_analyze_duration = max_analyze_duration;
@@ -3539,7 +3560,7 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
     }
 
     if (ic->pb)
-        av_log(ic, AV_LOG_DEBUG, "Before avformat_find_stream_info() pos: %"PRId64" bytes read:%"PRId64" seeks:%d nb_streams:%d\n",
+        av_log(ic, AV_LOG_DEBUG, "Tango Before avformat_find_stream_info() pos: %"PRId64" bytes read:%"PRId64" seeks:%d nb_streams:%d\n",
                avio_tell(ic->pb), ic->pb->bytes_read, ic->pb->seek_count, ic->nb_streams);
 
     for (i = 0; i < ic->nb_streams; i++) {
@@ -3625,8 +3646,11 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
         ic->streams[i]->info->fps_first_dts = AV_NOPTS_VALUE;
         ic->streams[i]->info->fps_last_dts  = AV_NOPTS_VALUE;
+		if (AVMEDIA_TYPE_VIDEO == ic->streams[i]->codecpar->codec_type){
+            video_index = i;
+        }
     }
-
+    int decodec_state[2] ={0,0};
     read_size = 0;
     for (;;) {
         int analyzed_all_streams;
@@ -3845,14 +3869,30 @@ FF_ENABLE_DEPRECATION_WARNINGS
          * least one frame of codec data, this makes sure the codec initializes
          * the channel configuration and does not only trust the values from
          * the container. */
-        try_decode_frame(ic, st, pkt,
-                         (options && i < orig_nb_streams) ? &options[i] : NULL);
+        if(decodec_state[pkt->stream_index] == 0 &&(pkt->flags& AV_PKT_FLAG_KEY))
+        {
+            if(pkt->stream_index == video_index){                
+                decodec_state[pkt->stream_index] = 1;
+            }else
+            {
+                int decode_ok = try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL);
+                if(decode_ok > 0){
+                    decodec_state[pkt->stream_index] = 1;
+                }
+            }
+            av_log(ic, AV_LOG_DEBUG, "Tango avformat_find_stream_info for loop try_decode_frame start pkt.size=%d,stream_index=%d\n",pkt->size,pkt->stream_index);
+        }
 
+
+       
         if (ic->flags & AVFMT_FLAG_NOBUFFER)
             av_packet_unref(pkt);
 
         st->codec_info_nb_frames++;
         count++;
+        if(decodec_state[0] == 1 && decodec_state[1] == 1){
+            break;
+        }        
     }
 
     if (eof_reached) {
@@ -3880,7 +3920,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
             }
         }
     }
-
+    
     if (flush_codecs) {
         AVPacket empty_pkt = { 0 };
         int err = 0;
