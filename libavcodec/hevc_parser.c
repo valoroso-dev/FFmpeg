@@ -93,7 +93,6 @@ static int hevc_parse_slice_header(AVCodecParserContext *s, H2645NAL *nal,
     s->format       = ps->sps->pix_fmt;
     avctx->profile  = ps->sps->ptl.general_ptl.profile_idc;
     avctx->level    = ps->sps->ptl.general_ptl.level_idc;
-
     if (ps->vps->vps_timing_info_present_flag) {
         num = ps->vps->vps_num_units_in_tick;
         den = ps->vps->vps_time_scale;
@@ -101,11 +100,9 @@ static int hevc_parse_slice_header(AVCodecParserContext *s, H2645NAL *nal,
         num = ps->sps->vui.vui_num_units_in_tick;
         den = ps->sps->vui.vui_time_scale;
     }
-
     if (num != 0 && den != 0)
         av_reduce(&avctx->framerate.den, &avctx->framerate.num,
                   num, den, 1 << 30);
-
     if (!sh->first_slice_in_pic_flag) {
         int slice_address_length;
 

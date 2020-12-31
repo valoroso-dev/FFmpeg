@@ -1922,6 +1922,8 @@ typedef struct AVFormatContext {
      * - decoding: set by user
      */
     int max_streams;
+
+    int live_quick_start;
 } AVFormatContext;
 
 /**
@@ -2328,6 +2330,8 @@ int av_find_best_stream(AVFormatContext *ic,
  * @return 0 if OK, < 0 on error or end of file
  */
 int av_read_frame(AVFormatContext *s, AVPacket *pkt);
+
+void add_to_pktbuf_ijk(AVFormatContext *s, AVPacket *pkt);
 
 /**
  * Seek to the keyframe at timestamp.

@@ -426,7 +426,6 @@ int ff_hevc_decode_nal_vps(GetBitContext *gb, AVCodecContext *avctx,
         return AVERROR(ENOMEM);
     vps = (HEVCVPS*)vps_buf->data;
 
-    av_log(avctx, AV_LOG_DEBUG, "Decoding VPS\n");
 
     nal_size = gb->buffer_end - gb->buffer;
     if (nal_size > sizeof(vps->data)) {
@@ -539,7 +538,6 @@ int ff_hevc_decode_nal_vps(GetBitContext *gb, AVCodecContext *avctx,
         remove_vps(ps, vps_id);
         ps->vps_list[vps_id] = vps_buf;
     }
-
     return 0;
 
 err:
@@ -1228,7 +1226,6 @@ int ff_hevc_decode_nal_sps(GetBitContext *gb, AVCodecContext *avctx,
         return AVERROR(ENOMEM);
     sps = (HEVCSPS*)sps_buf->data;
 
-    av_log(avctx, AV_LOG_DEBUG, "Decoding SPS\n");
 
     nal_size = gb->buffer_end - gb->buffer;
     if (nal_size > sizeof(sps->data)) {
@@ -1269,7 +1266,6 @@ int ff_hevc_decode_nal_sps(GetBitContext *gb, AVCodecContext *avctx,
         remove_sps(ps, sps_id);
         ps->sps_list[sps_id] = sps_buf;
     }
-
     return 0;
 }
 
@@ -1470,7 +1466,6 @@ int ff_hevc_decode_nal_pps(GetBitContext *gb, AVCodecContext *avctx,
 
     AVBufferRef *pps_buf;
     HEVCPPS *pps = av_mallocz(sizeof(*pps));
-
     if (!pps)
         return AVERROR(ENOMEM);
 
@@ -1696,7 +1691,6 @@ int ff_hevc_decode_nal_pps(GetBitContext *gb, AVCodecContext *avctx,
 
     remove_pps(ps, pps_id);
     ps->pps_list[pps_id] = pps_buf;
-
     return 0;
 
 err:

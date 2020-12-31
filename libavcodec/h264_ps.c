@@ -479,12 +479,11 @@ int ff_h264_decode_seq_parameter_set(GetBitContext *gb, AVCodecContext *avctx,
     sps->gaps_in_frame_num_allowed_flag = get_bits1(gb);
     sps->mb_width                       = get_ue_golomb(gb) + 1;
     sps->mb_height                      = get_ue_golomb(gb) + 1;
-    if(sps->mb_width>0 && avctx->width <=0){
+    if(sps->mb_width > 0 && avctx->width <= 0) {
          avctx->width = 16*sps->mb_width;
          avctx->height = 16*sps->mb_height;
+		 av_log(avctx, AV_LOG_WARNING, "Rapid SPS sps->mb_height =%d \n",sps->mb_height);
     }
-
-    av_log(avctx, AV_LOG_WARNING, "Tango SPS sps->mb_height =%d \n",sps->mb_height);
     sps->frame_mbs_only_flag = get_bits1(gb);
 
     if (sps->mb_height >= INT_MAX / 2U) {
