@@ -1272,7 +1272,7 @@ static void compute_pkt_fields(AVFormatContext *s, AVStream *st,
     duration = av_mul_q((AVRational) {pkt->duration, 1}, st->time_base);
     //av_log(s, AV_LOG_WARNING,"Rapid compute_pkt_fields duration = %"PRId64"\n", duration);
     if (pkt->duration == 0) {
-        ff_compute_frame_duration(s, &num, &den, st, pc, pkt);  
+        ff_compute_frame_duration(s, &num, &den, st, pc, pkt);
         if (den && num) {
             duration = (AVRational) {num, den};
             pkt->duration = av_rescale_rnd(1,
@@ -2789,7 +2789,7 @@ static void estimate_timings_from_pts(AVFormatContext *ic, int64_t old_offset)
                         pkt->duration = av_rescale_rnd(1,
                                            num * (int64_t) st->time_base.den,
                                            den * (int64_t) st->time_base.num,
-                                           AV_ROUND_DOWN);                  
+                                           AV_ROUND_DOWN);
                     }
                 }
                 duration = pkt->pts + pkt->duration;
@@ -3848,9 +3848,9 @@ FF_ENABLE_DEPRECATION_WARNINGS
          * least one frame of codec data, this makes sure the codec initializes
          * the channel configuration and does not only trust the values from
          * the container. */
-        if(ic->live_quick_start) {
-            if(decodec_state[pkt->stream_index] == 0 &&(pkt->flags& AV_PKT_FLAG_KEY)) {
-                if(pkt->stream_index == video_index) {      
+        if (ic->live_quick_start) {
+            if (decodec_state[pkt->stream_index] == 0 &&(pkt->flags& AV_PKT_FLAG_KEY)) {
+                if (pkt->stream_index == video_index) {
                     decodec_state[pkt->stream_index] = 1;
                 } else {
                     int decode_ok = try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL);
@@ -3869,7 +3869,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
         st->codec_info_nb_frames++;
         count++;
-        if(decodec_state[0] == 1 && decodec_state[1] == 1) {
+        if (decodec_state[0] == 1 && decodec_state[1] == 1) {
             break;
         }
     }
