@@ -3629,6 +3629,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
             video_index = i;
         }
     }
+    // state for video at 0, audio at 1
     int decodec_state[2] = {0,0};
     read_size = 0;
     for (;;) {
@@ -3849,15 +3850,13 @@ FF_ENABLE_DEPRECATION_WARNINGS
          * the channel configuration and does not only trust the values from
          * the container. */
         if (ic->live_quick_start) {
-            if (decodec_state[pkt->stream_index] == 0 &&(pkt->flags& AV_PKT_FLAG_KEY)) {
-                if (pkt->stream_index == video_index) {
-                    decodec_state[pkt->stream_index] = 1;
-                } else {
-                    int decode_ok = try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL);
-                    if(decode_ok > 0) {
-                        decodec_state[pkt->stream_index] = 1;
-                    }
+            int index = pkt->stream_index == video_index ? 0 :1;
+            if (decodec_state[index] == 0 &&(pkt->flags& AV_PKT_FLAG_KEY)) {
+                int netxtstate = 1;
+                if (pkt->stream_index != video_index) {
+                    netxtstate = try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL) > 0 ? 1 : 0;
                 }
+                decodec_state[index] == netxtstate;
                 av_log(ic, AV_LOG_DEBUG, "Rapid avformat_find_stream_info for loop try_decode_frame start pkt.size=%d,stream_index=%d\n",pkt->size,pkt->stream_index);
             }
         } else {
