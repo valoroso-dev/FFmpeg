@@ -481,8 +481,8 @@ int ff_h264_decode_seq_parameter_set(GetBitContext *gb, AVCodecContext *avctx,
     sps->mb_height                      = get_ue_golomb(gb) + 1;
     if (sps->mb_width > 0 && avctx->width <= 0) {
         avctx->width = 16*sps->mb_width;
-        avctx->height = 16*sps->mb_height;   
-		av_log(avctx, AV_LOG_WARNING, "Rapid SPS sps->mb_height =%d\n",sps->mb_height);
+        avctx->height = 16*sps->mb_height * (2 - sps->frame_mbs_only_flag);
+        av_log(avctx, AV_LOG_WARNING, "Rapid SPS sps->mb_height =%d\n",sps->mb_height);
     }
     if (sps->profile_idc > 0 && avctx->profile <= 0) {
         avctx->profile = sps->profile_idc;
