@@ -3521,6 +3521,7 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
     int64_t probesize = ic->probesize;
     int eof_reached = 0;
     int *missing_streams = av_opt_ptr(ic->iformat->priv_class, ic->priv_data, "missing_streams");
+    int has_enlarged = 0;
 
     flush_codecs = probesize > 0;
 	int video_index = 0;
