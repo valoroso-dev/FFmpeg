@@ -3707,6 +3707,12 @@ FF_ENABLE_DEPRECATION_WARNINGS
                 break;
             }
         }
+        // if we did not get at least 1 video and 1 audio, enlarge the probesize and try one more times
+        if (read_size >= probesize && has_enlarged == 0 && (decodec_state[0] == 0 || decodec_state[1] == 0)) {
+            av_log(ic, AV_LOG_INFO, "enlarge probesize to find more stream info");
+            probesize += 350000;
+            has_enlarged = 1;
+        }
         /* We did not get all the codec info, but we read too much data. */
         if (read_size >= probesize) {
             ret = count;
