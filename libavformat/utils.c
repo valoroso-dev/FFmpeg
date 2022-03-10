@@ -3573,6 +3573,7 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
     int64_t max_subtitle_analyze_duration;
     int64_t probesize = ic->probesize;
     int eof_reached = 0;
+    int has_enlarged = 0;
     int *missing_streams = av_opt_ptr(ic->iformat->priv_class, ic->priv_data, "missing_streams");
 
     AVDictionaryEntry *t;
@@ -3634,7 +3635,7 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
     }
 
     flush_codecs = probesize > 0;
-
+	int video_index = 0;
     av_opt_set(ic, "skip_clear", "1", AV_OPT_SEARCH_CHILDREN);
 
     max_stream_analyze_duration = max_analyze_duration;
@@ -3736,8 +3737,12 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
         ic->streams[i]->info->fps_first_dts = AV_NOPTS_VALUE;
         ic->streams[i]->info->fps_last_dts  = AV_NOPTS_VALUE;
+		if (AVMEDIA_TYPE_VIDEO == ic->streams[i]->codecpar->codec_type) {
+            video_index = i;
+        }
     }
-
+    // state for video at 0, audio at 1
+    int decodec_state[2] = {0,0};
     read_size = 0;
     for (;;) {
         int analyzed_all_streams;
@@ -3818,6 +3823,12 @@ FF_ENABLE_DEPRECATION_WARNINGS
                 flush_codecs = 0;
                 break;
             }
+        }
+        // if we did not get at least 1 video and 1 audio, enlarge the probesize and try one more times
+        if (read_size >= probesize && has_enlarged == 0 && (decodec_state[0] == 0 || decodec_state[1] == 0)) {
+            av_log(ic, AV_LOG_INFO, "enlarge probesize to find more stream info");
+            probesize += 350000;
+            has_enlarged = 1;
         }
         /* We did not get all the codec info, but we read too much data. */
         if (read_size >= probesize) {
@@ -3965,14 +3976,25 @@ FF_ENABLE_DEPRECATION_WARNINGS
          * least one frame of codec data, this makes sure the codec initializes
          * the channel configuration and does not only trust the values from
          * the container. */
-        try_decode_frame(ic, st, pkt,
-                         (options && i < orig_nb_streams) ? &options[i] : NULL);
+        if (ic->live_quick_start) {
+            int index = pkt->stream_index == video_index ? 0 :1;
+            if (decodec_state[index] == 0 &&(pkt->flags& AV_PKT_FLAG_KEY)) {
+                int netxtstate = try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL) > 0 ? 1 : 0;
+                decodec_state[index] == netxtstate;
+                av_log(ic, AV_LOG_DEBUG, "Rapid avformat_find_stream_info for loop try_decode_frame start pkt.size=%d,stream_index=%d\n",pkt->size,pkt->stream_index);
+            }
+        } else {
+            try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL);
+        }
 
         if (ic->flags & AVFMT_FLAG_NOBUFFER)
             av_packet_unref(pkt);
 
         st->codec_info_nb_frames++;
         count++;
+        if (decodec_state[0] == 1 && decodec_state[1] == 1) {
+            break;
+        }
     }
 
     if (eof_reached) {

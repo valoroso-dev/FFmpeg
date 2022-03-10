@@ -726,6 +726,7 @@ static int parse_playlist(HLSContext *c, const char *url,
     uint8_t *new_url = NULL;
     struct variant_info variant_info;
     char tmp_str[MAX_URL_SIZE];
+    char *tmp_str2;
     struct segment *cur_init_section = NULL;
     int is_http = av_strstart(url, "http", NULL);
 
@@ -919,10 +920,17 @@ static int parse_playlist(HLSContext *c, const char *url,
                     av_strlcat(io_url, tmp_str, sizeof(io_url));
                     seg->url = av_strdup(io_url);
                     memset(io_url, 0, sizeof(io_url));
+                } else if (av_strstart(tmp_str, "ijk", NULL)) {
+                    tmp_str2 = strchr(tmp_str, ':');
+                    if (tmp_str2) {
+                        seg->url = av_strdup(tmp_str2 + 1);
+                    } else {
+                        seg->url = av_strdup(tmp_str);
+                    }
                 } else {
                     seg->url = av_strdup(tmp_str);
                 }
-
+                av_log(c->ctx, AV_LOG_DEBUG, "parse_playlist,new segment url %s", seg->url);
                 if (!seg->url) {
                     av_free(seg->key);
                     av_free(seg);

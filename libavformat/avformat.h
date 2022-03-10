@@ -1931,6 +1931,8 @@ typedef struct AVFormatContext {
      * - decoding: set by user
      */
     int max_streams;
+
+    int live_quick_start;
 } AVFormatContext;
 
 #if FF_API_FORMAT_GET_SET
