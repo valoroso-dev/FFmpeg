@@ -3859,8 +3859,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
         if (ic->live_quick_start) {
             int index = pkt->stream_index == video_index ? 0 :1;
             if (decodec_state[index] == 0 &&(pkt->flags& AV_PKT_FLAG_KEY)) {
-                int netxtstate = try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL) > 0 ? 1 : 0;
-                decodec_state[index] == netxtstate;
+                int nextstate = try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL) > 0 ? 1 : 0;
+                decodec_state[index] = nextstate;
                 av_log(ic, AV_LOG_DEBUG, "Rapid avformat_find_stream_info for loop try_decode_frame start pkt.size=%d,stream_index=%d\n",pkt->size,pkt->stream_index);
             }
         } else {
