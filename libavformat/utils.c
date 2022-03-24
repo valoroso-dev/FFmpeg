@@ -3630,8 +3630,11 @@ FF_ENABLE_DEPRECATION_WARNINGS
             video_index = i;
         }
     }
-    // state for video at 0, audio at 1
-    int decodec_state[2] = {0,0};
+    // max 32 tracks, 1 bit for 1 track
+    const int all_streams_processed = (0x1 << ic->nb_streams) -1;
+    int streams_decode_state = 0;
+#define STATE_GET(n) ((streams_decode_state >> n) & (0x1))
+#define STATE_SET(n) (streams_decode_state |= ((0x1) << n))
     read_size = 0;
     for (;;) {
         int analyzed_all_streams;
@@ -3709,7 +3712,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
             }
         }
         // if we did not get at least 1 video and 1 audio, enlarge the probesize and try one more times
-        if (read_size >= probesize && has_enlarged == 0 && (decodec_state[0] == 0 || decodec_state[1] == 0)) {
+        if (read_size >= probesize && has_enlarged == 0 && STATE_GET(video_index) == 0 || streams_decode_state == (0x01 << video_index)) {
             av_log(ic, AV_LOG_INFO, "enlarge probesize to find more stream info");
             probesize += 350000;
             has_enlarged = 1;
@@ -3857,11 +3860,13 @@ FF_ENABLE_DEPRECATION_WARNINGS
          * the channel configuration and does not only trust the values from
          * the container. */
         if (ic->live_quick_start) {
-            int index = pkt->stream_index == video_index ? 0 :1;
-            if (decodec_state[index] == 0 &&(pkt->flags& AV_PKT_FLAG_KEY)) {
+            int index = pkt->stream_index;
+            if (STATE_GET(index) == 0 &&(pkt->flags& AV_PKT_FLAG_KEY)) {
                 int nextstate = try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL) > 0 ? 1 : 0;
-                decodec_state[index] = nextstate;
-                av_log(ic, AV_LOG_DEBUG, "Rapid avformat_find_stream_info for loop try_decode_frame start pkt.size=%d,stream_index=%d\n",pkt->size,pkt->stream_index);
+                if(nextstate) {
+                    STATE_SET(index);
+                }
+                av_log(ic, AV_LOG_DEBUG, "Rapid avformat_find_stream_info for loop try_decode_frame start pkt.size=%d,stream_index=%d,state=%d\n",pkt->size,pkt->stream_index,streams_decode_state);
             }
         } else {
             try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL);
@@ -3872,8 +3877,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
         st->codec_info_nb_frames++;
         count++;
-        if (decodec_state[0] == 1 && decodec_state[1] == 1) {
-            break;
+        if ( streams_decode_state == all_streams_processed ) {
+           break;
         }
     }
 
