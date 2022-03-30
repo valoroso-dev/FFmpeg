@@ -3712,8 +3712,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
             }
         }
         // if we did not get at least 1 video and 1 audio, enlarge the probesize and try one more times
-        if (read_size >= probesize && has_enlarged == 0 && STATE_GET(video_index) == 0 || streams_decode_state == (0x01 << video_index)) {
-            av_log(ic, AV_LOG_INFO, "enlarge probesize to find more stream info");
+        if (read_size >= probesize && has_enlarged == 0 && (STATE_GET(video_index) == 0 || streams_decode_state == (0x01 << video_index))) {
+            av_log(ic, AV_LOG_INFO, "enlarge probesize to find more stream info read&probe is %d,%d",read_size, probesize);
             probesize += 350000;
             has_enlarged = 1;
         }
