@@ -572,6 +572,7 @@ int ff_h264_decode_seq_parameter_set(GetBitContext *gb, AVCodecContext *avctx,
         int ret = decode_vui_parameters(gb, avctx, sps);
         if (ret < 0)
             goto fail;
+        avctx->sample_aspect_ratio = sps->sar;
     }
 
     if (get_bits_left(gb) < 0) {

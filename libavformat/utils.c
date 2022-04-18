@@ -3747,6 +3747,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
         pkt = &pkt1;
 
+        av_log(ic, AV_LOG_DEBUG, "get pkt stream=%d, pts=%s, dts=%s, size=%d, duration=%"PRId64", flags=%d\n",
+               pkt->stream_index, av_ts2str(pkt->pts), av_ts2str(pkt->dts), pkt->size, pkt->duration, pkt->flags);
         if (!(ic->flags & AVFMT_FLAG_NOBUFFER)) {
             ret = add_to_pktbuf(&ic->internal->packet_buffer, pkt,
                                 &ic->internal->packet_buffer_end, 0);
