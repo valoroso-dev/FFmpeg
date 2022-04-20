@@ -1627,6 +1627,13 @@ FF_ENABLE_DEPRECATION_WARNINGS
             st->codecpar->channels = st->internal->avctx->channels;
             st->codecpar->channel_layout = st->internal->avctx->channel_layout;
             st->codecpar->codec_id = st->internal->avctx->codec_id;
+            if (!st->codecpar->width && st->internal->avctx->width) {
+                st->codecpar->width = st->internal->avctx->width;
+                st->codecpar->height = st->internal->avctx->height;
+            }
+            if (!st->codecpar->sample_aspect_ratio.num && st->internal->avctx->sample_aspect_ratio.num) {
+                st->codecpar->sample_aspect_ratio = st->internal->avctx->sample_aspect_ratio;
+            }
         } else {
             /* free packet */
             av_packet_unref(&cur_pkt);
@@ -3633,8 +3640,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
     // max 32 tracks, 1 bit for 1 track
     const int all_streams_processed = (0x1 << ic->nb_streams) -1;
     int streams_decode_state = 0;
-#define STATE_GET(n) ((streams_decode_state >> n) & (0x1))
-#define STATE_SET(n) (streams_decode_state |= ((0x1) << n))
+#define STATE_GET(n) ((streams_decode_state >> (n)) & (0x1))
+#define STATE_SET(n) (streams_decode_state |= ((0x1) << (n)))
     read_size = 0;
     for (;;) {
         int analyzed_all_streams;
