@@ -127,6 +127,15 @@ typedef struct MOVIndexRange {
     int64_t end;
 } MOVIndexRange;
 
+typedef struct MOVDrmContext {
+    unsigned int scheme_type;
+    unsigned int scheme_version;
+    char *scheme_uri;
+    unsigned int default_is_encrypted;
+    uint8_t default_iv_size;
+    uint8_t default_kid[16];
+} MOVDrmContext;
+
 typedef struct MOVStreamContext {
     AVIOContext *pb;
     int pb_is_copied;
@@ -205,6 +214,8 @@ typedef struct MOVStreamContext {
     int has_sidx;  // If there is an sidx entry for this stream.
     struct {
         int use_subsamples;
+        size_t encrypted_sample_count;
+        int encrypted_sample_start_index;
         uint8_t* auxiliary_info;
         uint8_t* auxiliary_info_end;
         uint8_t* auxiliary_info_pos;
@@ -214,6 +225,8 @@ typedef struct MOVStreamContext {
         int64_t auxiliary_info_index;
         struct AVAESCTR* aes_ctr;
     } cenc;
+
+    MOVDrmContext *drm_context;
 } MOVStreamContext;
 
 typedef struct MOVContext {
