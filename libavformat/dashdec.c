@@ -1304,6 +1304,11 @@ static struct fragment *get_current_fragment(struct representation *pls)
     }
     if (seg) {
         char tmpfilename[MAX_URL_SIZE];
+        if (!pls->url_template) {
+            av_log(pls->parent, AV_LOG_ERROR, "Cannot get fragment, missing template URL\n");
+            av_free(seg);
+            return NULL;
+        }
 
         ff_dash_fill_tmpl_params(tmpfilename, sizeof(tmpfilename), pls->url_template, 0, pls->cur_seq_no, 0, get_segment_start_time_based_on_timeline(pls, pls->cur_seq_no));
         seg->url = av_strireplace(pls->url_template, pls->url_template, tmpfilename);
