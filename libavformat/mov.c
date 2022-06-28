@@ -5451,15 +5451,19 @@ static int read_cenc_data(MOVContext *c, MOVStreamContext *sc, int64_t index, AV
             return AVERROR_INVALIDDATA;
         }
 
+        uint32_t total_size = 1 + sc->cenc.auxiliary_info_default_size + 16;
         side = av_packet_new_side_data(pkt,
                                        AV_PKT_DATA_DRM_KEY,
-                                       sc->cenc.auxiliary_info_default_size + 1);
+                                       total_size);
         if (!side)
             return AVERROR(ENOMEM);
         side[0] = sc->drm_context->default_iv_size | (sc->cenc.use_subsamples ? 0x80 : 0);
         memcpy(side + 1, sc->cenc.auxiliary_info_pos, sc->cenc.auxiliary_info_default_size);
         sc->cenc.auxiliary_info_pos += sc->cenc.auxiliary_info_default_size;
         sc->cenc.auxiliary_info_index++;
+
+        memcpy(side + 1 + sc->cenc.auxiliary_info_default_size, sc->drm_context->default_kid, 16);
+
         pkt->flags |= AV_PKT_FLAG_ENCRYPTED;
     }
 
