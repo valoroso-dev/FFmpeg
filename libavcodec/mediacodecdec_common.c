@@ -271,11 +271,18 @@ static int mediacodec_wrap_sw_buffer(AVCodecContext *avctx,
     int ret = 0;
     int status = 0;
 
-    frame->width = avctx->width;
-    frame->height = avctx->height;
-    frame->format = avctx->pix_fmt;
-    frame->sample_rate = avctx->sample_rate;
-    frame->channels = avctx->channels;
+    if (avctx->codec_type == AVMEDIA_TYPE_AUDIO) {
+        frame->sample_rate = avctx->sample_rate;
+        frame->channels = avctx->channels;
+        frame->channel_layout = avctx->channel_layout;
+        frame->nb_samples = avctx->frame_size;
+        frame->format = avctx->sample_fmt;
+        frame->key_frame = 1;
+    } else {
+        frame->width = avctx->width;
+        frame->height = avctx->height;
+        frame->format = avctx->pix_fmt;
+    }
 
     /* MediaCodec buffers needs to be copied to our own refcounted buffers
      * because the flush command invalidates all input and output buffers.
@@ -388,13 +395,9 @@ static int mediacodec_dec_parse_audio_format(AVCodecContext *avctx, MediaCodecDe
     }
     s->channel_count = value;
 
-    if (!ff_AMediaFormat_getInt32(s->format, "pcm-encoding", &value)) {
-        format = ff_AMediaFormat_toString(s->format);
-        av_log(avctx, AV_LOG_ERROR, "Could not get %s from format %s\n", "pcm-encoding", format);
-        av_freep(&format);
-        return AVERROR_EXTERNAL;
+    if (ff_AMediaFormat_getInt32(s->format, "pcm-encoding", &value)) {
+        s->pcm_encoding = value;
     }
-    s->pcm_encoding = value;
 
     av_log(avctx, AV_LOG_INFO,
         "Output audio parameters sample_rate=%d channel_count=%d pcm_encoding=%d\n", s->sample_rate, s->channel_count, s->pcm_encoding);

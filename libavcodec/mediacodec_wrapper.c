@@ -464,7 +464,7 @@ char *ff_AMediaCodecList_getCodecNameByType(const char *mime, int profile, int e
                     goto done;
                 }
 
-                if (strstr(name, "OMX.google")) {
+                if (strstr(name, "OMX.google") && strstr(mime, "video")) {
                     av_freep(&name);
                     goto done_with_type;
                 }
