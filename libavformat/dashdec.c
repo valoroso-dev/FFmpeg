@@ -1715,8 +1715,8 @@ static int dash_read_header(AVFormatContext *s)
         }
     }
 
-    char *drm_info = *drm_holder;
-    if (drm_info) {
+    if (drm_holder && (*drm_holder)) {
+        char *drm_info = *drm_holder;
         if (c->cp_audio) {
             sprintf(drm_info, "audio,%s,%s", c->cp_audio->scheme_id_url, c->cp_audio->cenc_pssh);
         }

@@ -276,7 +276,7 @@ static int mediacodec_wrap_sw_buffer(AVCodecContext *avctx,
         frame->channels = avctx->channels;
         frame->channel_layout = avctx->channel_layout;
         frame->nb_samples = avctx->frame_size;
-        frame->format = avctx->sample_fmt;
+        frame->format = s->pcm_encoding == 4 ? AV_SAMPLE_FMT_FLT : (s->pcm_encoding == 3 ? AV_SAMPLE_FMT_U8 : AV_SAMPLE_FMT_S16);
         frame->key_frame = 1;
     } else {
         frame->width = avctx->width;
@@ -312,7 +312,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
     if (avctx->codec_type == AVMEDIA_TYPE_AUDIO) {
     av_log(avctx, AV_LOG_DEBUG,
-            "Frame: sample_rate=%d channels=%d encoding=%d\n" , s->sample_rate, s->channel_count, s->pcm_encoding);
+            "Frame: sample_rate=%d channels=%d format=%d\n" , s->sample_rate, s->channel_count, frame->format);
         ff_mediacodec_sw_buffer_copy_audio(avctx, s, data, size, info, frame);
     } else {
     av_log(avctx, AV_LOG_DEBUG,
@@ -397,6 +397,8 @@ static int mediacodec_dec_parse_audio_format(AVCodecContext *avctx, MediaCodecDe
 
     if (ff_AMediaFormat_getInt32(s->format, "pcm-encoding", &value)) {
         s->pcm_encoding = value;
+    } else {
+        s->pcm_encoding = /* ENCODING_PCM_16BIT */ 2;
     }
 
     av_log(avctx, AV_LOG_INFO,

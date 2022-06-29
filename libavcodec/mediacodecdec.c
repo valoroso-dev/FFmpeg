@@ -402,6 +402,7 @@ static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
     ff_AMediaFormat_setInt32(format, "height", avctx->height);
     ff_AMediaFormat_setInt32(format, "sample-rate", avctx->sample_rate);
     ff_AMediaFormat_setInt32(format, "channel-count", avctx->channels);
+    // ff_AMediaFormat_setInt32(format, "pcm-encoding", /* ENCODING_PCM_16BIT */ 2);
 
     s->ctx = av_mallocz(sizeof(*s->ctx));
     if (!s->ctx) {
