@@ -136,4 +136,8 @@ int ff_AMediaCodec_getConfigureFlagEncode(FFAMediaCodec *codec);
 
 int ff_AMediaCodec_cleanOutputBuffers(FFAMediaCodec *codec);
 
+FFAMediaCodecCryptoInfo* ff_AMediaCodec_CryptoInfo_new();
+int ff_AMediaCodec_CryptoInfo_delete(FFAMediaCodecCryptoInfo *crypto_info);
+int ff_AMediaCodec_CryptoInfo_fill(uint8_t *key_data, uint32_t key_data_size, FFAMediaCodecCryptoInfo **crypto_info, uint32_t av_data_len);
+
 #endif /* AVCODEC_MEDIACODEC_WRAPPER_H */

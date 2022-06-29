@@ -1405,7 +1405,8 @@ int ff_AMediaCodec_configure(FFAMediaCodec* codec, const FFAMediaFormat* format,
 
     JNI_GET_ENV_OR_RETURN(env, codec, AVERROR_EXTERNAL);
 
-    (*env)->CallVoidMethod(env, codec->object, codec->jfields.configure_id, format->object, surface, NULL, flags);
+    av_log(NULL, AV_LOG_INFO, "ff_AMediaCodec_configure surface:%p, crypto:%p", surface, crypto);
+    (*env)->CallVoidMethod(env, codec->object, codec->jfields.configure_id, format->object, surface, crypto, flags);
     if (ff_jni_exception_check(env, 1, codec) < 0) {
         ret = AVERROR_EXTERNAL;
         goto fail;
@@ -1561,19 +1562,15 @@ int ff_AMediaCodec_queueSecureInputBuffer(FFAMediaCodec* codec, size_t idx, off_
 
     jstring cryptoInfoString = (*env)->CallObjectMethod(env, crypto_info, codec->jfields.method_CryptoInfo_toString);
     const char* c_str = (*env)->GetStringUTFChars(env, cryptoInfoString, NULL);
-    av_log(NULL, AV_LOG_INFO, "ff_AMediaCodec_queueSecureInputBuffer cryptoInfoString: '%s'", c_str);
+    av_log(NULL, AV_LOG_DEBUG, "ff_AMediaCodec_queueSecureInputBuffer cryptoInfoString: '%s'", c_str);
     (*env)->ReleaseStringUTFChars(env, cryptoInfoString, c_str);
     (*env)->DeleteLocalRef(env, cryptoInfoString);
 
     (*env)->CallVoidMethod(env, codec->object, codec->jfields.queue_secure_input_buffer_id, (jint)idx, (jint)offset, crypto_info, time, flags);
 
-    (*env)->ReleaseIntArrayElements(env, numBytesOfClearData, info->numBytesOfClearData, 0);
     (*env)->DeleteLocalRef(env, numBytesOfClearData);
-    (*env)->ReleaseIntArrayElements(env, numBytesOfEncryptedData, info->numBytesOfEncryptedData, 0);
     (*env)->DeleteLocalRef(env, numBytesOfEncryptedData);
-    (*env)->ReleaseByteArrayElements(env, iv, info->iv, 0);
     (*env)->DeleteLocalRef(env, iv);
-    (*env)->ReleaseByteArrayElements(env, key, info->key, 0);
     (*env)->DeleteLocalRef(env, key);
     (*env)->DeleteLocalRef(env, crypto_info);
     if ((ret = ff_jni_exception_check(env, 1, codec)) < 0) {
@@ -1812,4 +1809,74 @@ int ff_AMediaCodec_cleanOutputBuffers(FFAMediaCodec *codec)
 
 fail:
     return ret;
+}
+
+FFAMediaCodecCryptoInfo* ff_AMediaCodec_CryptoInfo_new()
+{
+    FFAMediaCodecCryptoInfo *crypto_info;
+    crypto_info = av_mallocz(sizeof(FFAMediaCodecCryptoInfo));
+    crypto_info->ivLength = 16;
+    crypto_info->iv = av_mallocz(crypto_info->ivLength);
+    crypto_info->keyLength = 16;
+    crypto_info->key = av_mallocz(crypto_info->keyLength);
+    crypto_info->mode = 1;
+    crypto_info->numSubSamples = 0;
+    av_log(NULL, AV_LOG_WARNING, "ff_AMediaCodec_CryptoInfo_new %p\n", crypto_info);
+    return crypto_info;
+}
+
+int ff_AMediaCodec_CryptoInfo_delete(FFAMediaCodecCryptoInfo *crypto_info)
+{
+    av_log(NULL, AV_LOG_WARNING, "ff_AMediaCodec_CryptoInfo_delete %p\n", crypto_info);
+    av_freep(&crypto_info->iv);
+    av_freep(&crypto_info->key);
+    av_freep(&crypto_info->numBytesOfClearData);
+    av_freep(&crypto_info->numBytesOfEncryptedData);
+    av_freep(&crypto_info);
+    return 0;
+}
+
+int ff_AMediaCodec_CryptoInfo_fill(uint8_t *key_data, uint32_t key_data_size, FFAMediaCodecCryptoInfo **crypto_info, uint32_t av_data_len)
+{
+    FFAMediaCodecCryptoInfo *out = *crypto_info;
+    uint8_t iv_size = key_data[0] & 0x7F;
+    uint8_t is_encrypted = key_data[0] & 0x80;
+    key_data += 1;
+
+    memset(out->iv, 0, out->ivLength);
+    memcpy(out->iv, key_data, iv_size);
+    key_data += iv_size;
+
+    uint32_t subsample_count;
+    if (is_encrypted) {
+        subsample_count = key_data[0] * 256 + key_data[1];
+        key_data += 2;
+    } else {
+        subsample_count = 1;
+    }
+
+    if (subsample_count > out->numSubSamples) {
+        av_freep(&out->numBytesOfClearData);
+        av_freep(&out->numBytesOfEncryptedData);
+        out->numBytesOfClearData = av_mallocz(subsample_count);
+        out->numBytesOfEncryptedData = av_mallocz(subsample_count);
+    }
+    out->numSubSamples = subsample_count;
+
+    if (is_encrypted) {
+        for (int i = 0; i < subsample_count; i++) {
+            out->numBytesOfClearData[i] = key_data[0] * 256 + key_data[1];
+            key_data += 2;
+            out->numBytesOfEncryptedData[i] = key_data[0] * 256 * 256 * 256 + key_data[1] * 256 * 256 + key_data[2] * 256 + key_data[3];
+            key_data += 4;
+        }
+    } else {
+        out->numBytesOfClearData[0] = 0;
+        out->numBytesOfEncryptedData[0] = av_data_len;
+    }
+
+    memset(out->key, 0, out->keyLength);
+    memcpy(out->key, key_data, out->keyLength);
+
+    return 0;
 }

@@ -171,6 +171,11 @@ static void ff_mediacodec_dec_unref(MediaCodecDecContext *s)
             s->crypto = NULL;
         }
 
+        if (s->crypto_info) {
+            ff_AMediaCodec_CryptoInfo_delete(s->crypto_info);
+            s->crypto_info = NULL;
+        }
+
         av_freep(&s->codec_name);
         av_freep(&s);
     }
@@ -532,73 +537,6 @@ static int mediacodec_dec_flush_codec(AVCodecContext *avctx, MediaCodecDecContex
     return 0;
 }
 
-static FFAMediaCodecCryptoInfo* ff_new_crypto_info()
-{
-    FFAMediaCodecCryptoInfo *crypto_info;
-    crypto_info = av_mallocz(sizeof(FFAMediaCodecCryptoInfo));
-    crypto_info->ivLength = 16;
-    crypto_info->iv = av_mallocz(crypto_info->ivLength);
-    crypto_info->keyLength = 16;
-    crypto_info->key = av_mallocz(crypto_info->keyLength);
-    crypto_info->mode = 1;
-    crypto_info->numSubSamples = 0;
-    return crypto_info;
-}
-
-static void ff_free_crypto_info(FFAMediaCodecCryptoInfo *crypto_info)
-{
-    av_freep(&crypto_info->iv);
-    av_freep(&crypto_info->key);
-    av_freep(&crypto_info->numBytesOfClearData);
-    av_freep(&crypto_info->numBytesOfEncryptedData);
-    av_freep(&crypto_info);
-}
-
-static int ff_key_data_to_crypto_info(uint8_t *key_data, uint32_t key_data_size, FFAMediaCodecCryptoInfo **crypto_info, uint32_t av_data_len)
-{
-    FFAMediaCodecCryptoInfo *out = *crypto_info;
-    uint8_t iv_size = key_data[0] & 0x7F;
-    uint8_t is_encrypted = key_data[0] & 0x80;
-    key_data += 1;
-
-    memset(out->iv, 0, out->ivLength);
-    memcpy(out->iv, key_data, iv_size);
-    key_data += iv_size;
-
-    uint32_t subsample_count;
-    if (is_encrypted) {
-        subsample_count = key_data[0] * 256 + key_data[1];
-        key_data += 2;
-    } else {
-        subsample_count = 1;
-    }
-
-    if (subsample_count > out->numSubSamples) {
-        av_freep(&out->numBytesOfClearData);
-        av_freep(&out->numBytesOfEncryptedData);
-        out->numBytesOfClearData = av_mallocz(subsample_count);
-        out->numBytesOfEncryptedData = av_mallocz(subsample_count);
-    }
-    out->numSubSamples = subsample_count;
-
-    if (is_encrypted) {
-        for (int i = 0; i < subsample_count; i++) {
-            out->numBytesOfClearData[i] = key_data[0] * 256 + key_data[1];
-            key_data += 2;
-            out->numBytesOfEncryptedData[i] = key_data[0] * 256 * 256 * 256 + key_data[1] * 256 * 256 + key_data[2] * 256 + key_data[3];
-            key_data += 4;
-        }
-    } else {
-        out->numBytesOfClearData[0] = 0;
-        out->numBytesOfEncryptedData[0] = av_data_len;
-    }
-
-    memset(out->key, 0, out->keyLength);
-    memcpy(out->key, key_data, out->keyLength);
-
-    return 0;
-}
-
 int ff_mediacodec_dec_init(AVCodecContext *avctx, MediaCodecDecContext *s,
                            const char *mime, FFAMediaFormat *format)
 {
@@ -770,11 +708,18 @@ int ff_mediacodec_dec_decode(AVCodecContext *avctx, MediaCodecDecContext *s,
             }
 
             if (pkt->flags & AV_PKT_FLAG_ENCRYPTED) {
-                FFAMediaCodecCryptoInfo *crypto_info = ff_new_crypto_info();
+                if (!s->crypto_info) {
+                    s->crypto_info = ff_AMediaCodec_CryptoInfo_new();
+                }
+                if (!s->crypto_info) {
+                    av_log(avctx, AV_LOG_ERROR, "crypto info is invalid\n");
+                    return AVERROR_EXTERNAL;
+                }
+                FFAMediaCodecCryptoInfo *crypto_info = s->crypto_info;
                 uint8_t  *key_data      = NULL;
                 int       key_data_size = 0;
                 key_data = av_packet_get_side_data(pkt, AV_PKT_DATA_DRM_KEY, &key_data_size);
-                ff_key_data_to_crypto_info(key_data, key_data_size, &crypto_info, size);
+                ff_AMediaCodec_CryptoInfo_fill(key_data, key_data_size, &crypto_info, size);
                 status = ff_AMediaCodec_queueSecureInputBuffer(codec, index, 0, crypto_info, pts, 0);
             } else {
                 status = ff_AMediaCodec_queueInputBuffer(codec, index, 0, size, pts, 0);
@@ -954,4 +899,3 @@ AVHWAccel ff_vp9_mediacodec_hwaccel = {
     .id      = AV_CODEC_ID_VP9,
     .pix_fmt = AV_PIX_FMT_MEDIACODEC,
 };
-

@@ -662,4 +662,3 @@ AVCodec ff_aac_latm_mediacodec_decoder = {
     .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
     .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS,
 };
-

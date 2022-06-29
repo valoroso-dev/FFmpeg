@@ -41,6 +41,7 @@ typedef struct MediaCodecDecContext {
 
     FFAMediaCodec *codec;
     FFAMediaFormat *format;
+    FFAMediaCodecCryptoInfo *crypto_info;
 
     void *surface;
     void *crypto;

@@ -84,4 +84,3 @@ int ff_mediacodec_media_crypto_unref(void *crypto, void *log_ctx)
 
     return 0;
 }
-
