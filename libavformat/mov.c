@@ -5254,7 +5254,8 @@ static int mov_read_senc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         return 0;
 
     if (sc->drm_context) {
-        av_log(c->fc, AV_LOG_INFO, "mov_read_senc as drm info\n");
+        av_log(c->fc, AV_LOG_INFO, "mov_read_senc as drm info current_index=%"PRId64", auxiliary_info_index=%"PRId64"\n",
+                sc->current_index, sc->cenc.auxiliary_info_index);
     } else if (sc->cenc.aes_ctr) {
         av_log(c->fc, AV_LOG_ERROR, "duplicate senc atom\n");
         return AVERROR_INVALIDDATA;
@@ -5319,7 +5320,10 @@ static int mov_read_saiz(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     if (c->decryption_key_len == 0 && !sc->drm_context)
         return 0;
 
-    if (sc->cenc.auxiliary_info_sizes || sc->cenc.auxiliary_info_default_size) {
+    if (sc->drm_context) {
+        av_log(c->fc, AV_LOG_INFO, "mov_read_saiz as drm info current_index=%"PRId64", auxiliary_info_index=%"PRId64"\n",
+                sc->current_index, sc->cenc.auxiliary_info_index);
+    } else if (sc->cenc.auxiliary_info_sizes || sc->cenc.auxiliary_info_default_size) {
         av_log(c->fc, AV_LOG_ERROR, "duplicate saiz atom\n");
         return AVERROR_INVALIDDATA;
     }
@@ -5447,7 +5451,7 @@ static int read_cenc_data(MOVContext *c, MOVStreamContext *sc, int64_t index, AV
 
     if (sc->cenc.auxiliary_info_default_size > 0) {
         if (sc->cenc.auxiliary_info_default_size > sc->cenc.auxiliary_info_end - sc->cenc.auxiliary_info_pos) {
-            av_log(c->fc, AV_LOG_ERROR, "failed to read cenc data from the auxiliary info %d %d\n", index, sc->cenc.auxiliary_info_index);
+            av_log(c->fc, AV_LOG_ERROR, "failed to read cenc data from the auxiliary info %"PRId64" %"PRId64"\n", index, sc->cenc.auxiliary_info_index);
             return AVERROR_INVALIDDATA;
         }
 
