@@ -118,7 +118,9 @@ struct representation {
 struct contentprotection {
     /* drm info */
     enum AVMediaType media_type;
-    char *scheme_id_url;
+    char *scheme_type;
+    char *scheme_id_uri;
+    char *default_kid;
     char *cenc_pssh;
 };
 
@@ -342,7 +344,9 @@ static void free_representation(struct representation *pls)
 }
 
 static void free_contentprotection(struct contentprotection *con) {
-    av_freep(&con->scheme_id_url);
+    av_freep(&con->scheme_type);
+    av_freep(&con->scheme_id_uri);
+    av_freep(&con->default_kid);
     av_freep(&con->cenc_pssh);
     av_freep(&con);
     av_log(NULL, AV_LOG_WARNING, "free contentprotection");
@@ -594,32 +598,50 @@ static int parse_manifest_segmenturlnode(AVFormatContext *s, struct representati
     return 0;
 }
 
-static int parse_manifest_contentprotection(AVFormatContext *s, struct contentprotection **con,
+static int parse_manifest_contentprotection(AVFormatContext *s, struct contentprotection *con,
                                             xmlNodePtr contentprotection_node, enum AVMediaType type) {
     xmlNodePtr contentprotection_cenc_pssh_node = NULL;
     char *text;
 
+    if (!con) {
+        return AVERROR(ENOMEM);
+    }
+
     char *scheme_id_uri = xmlGetProp(contentprotection_node, "schemeIdUri");
-    if (!av_strcasecmp(scheme_id_uri, (const char *)"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed")) {
+    if (!av_strcasecmp(scheme_id_uri, (const char *)"urn:mpeg:dash:mp4protection:2011")) {
+        // parse scheme type
+        char *scheme_type = xmlGetProp(contentprotection_node, "value");
+        if (con->scheme_type) {
+            av_freep(&con->scheme_type);
+        }
+        con->scheme_type = av_strdup(scheme_type);
+
+        char *default_kid = xmlGetProp(contentprotection_node, "default_KID");
+        if (con->default_kid) {
+            av_freep(&con->default_kid);
+        }
+        con->default_kid = av_strdup(default_kid);
+        av_log(s, AV_LOG_WARNING, "parse manifest contentprotection scheme ctype %s %s %d", con->scheme_type, con->default_kid, con->media_type);
+        return 0;
+    } else if (!av_strcasecmp(scheme_id_uri, (const char *)"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed")) {
         contentprotection_cenc_pssh_node = find_child_node_by_name(contentprotection_node, "pssh");
         if (contentprotection_cenc_pssh_node) {
             text = xmlNodeGetContent(contentprotection_cenc_pssh_node);
-            struct contentprotection *new_con = NULL;
-            new_con = av_mallocz(sizeof(struct contentprotection));
-            if (!new_con) {
-                return AVERROR(ENOMEM);
+            if (con->scheme_id_uri) {
+                av_freep(&con->scheme_id_uri);
             }
-            new_con->scheme_id_url = av_strdup(scheme_id_uri);
-            new_con->cenc_pssh = av_strdup(text);
-            new_con->media_type = type;
-
-            if (*con) {
-                free_contentprotection(*con);
+            con->scheme_id_uri = av_strdup(scheme_id_uri);
+            if (con->cenc_pssh) {
+                av_freep(&con->cenc_pssh);
             }
-            *con = new_con;
-            av_log(s, AV_LOG_WARNING, "parse manifest contentprotection %s %s %d", (*con)->scheme_id_url, (*con)->cenc_pssh, (*con)->media_type);
+            con->cenc_pssh = av_strdup(text);
+            con->media_type = type;
+            av_log(s, AV_LOG_WARNING, "parse manifest contentprotection %s %s %s %s %d",
+                con->scheme_type, con->scheme_id_uri, con->default_kid, con->cenc_pssh, con->media_type);
             return 0;
         }
+    } else {
+        av_log(s, AV_LOG_ERROR, "not support schemeIdUri: '%s'\n", scheme_id_uri);
     }
     return AVERROR(EINVAL);
 }
@@ -893,9 +915,15 @@ static int parse_manifest_adaptationset(AVFormatContext *s, const char *url,
         } else if (!av_strcasecmp(node->name, (const char *)"ContentProtection")) {
             enum AVMediaType type = get_content_type(adaptionset_node);
             if (type == AVMEDIA_TYPE_VIDEO) {
-                parse_manifest_contentprotection(s, &c->cp_video, node, AVMEDIA_TYPE_VIDEO);
+                if (!c->cp_video) {
+                    c->cp_video = av_mallocz(sizeof(struct contentprotection));
+                }
+                parse_manifest_contentprotection(s, c->cp_video, node, AVMEDIA_TYPE_VIDEO);
             } else if (type == AVMEDIA_TYPE_AUDIO) {
-                parse_manifest_contentprotection(s, &c->cp_audio, node, AVMEDIA_TYPE_AUDIO);
+                if (!c->cp_audio) {
+                    c->cp_audio = av_mallocz(sizeof(struct contentprotection));
+                }
+                parse_manifest_contentprotection(s, c->cp_audio, node, AVMEDIA_TYPE_AUDIO);
             }
         } else if (!av_strcasecmp(node->name, (const char *)"Representation")) {
             ret = parse_manifest_representation(s, url, node,
@@ -1718,10 +1746,10 @@ static int dash_read_header(AVFormatContext *s)
     if (drm_holder && (*drm_holder)) {
         char *drm_info = *drm_holder;
         if (c->cp_audio) {
-            sprintf(drm_info, "audio,%s,%s", c->cp_audio->scheme_id_url, c->cp_audio->cenc_pssh);
+            sprintf(drm_info, "audio,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
         }
         if (c->cp_video) {
-            sprintf(drm_info, "%s;video,%s,%s", drm_info, c->cp_video->scheme_id_url, c->cp_video->cenc_pssh);
+            sprintf(drm_info, "%s;video,%s,%s,%s", drm_info, c->cp_audio->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
         }
         av_log(s, AV_LOG_WARNING, "read contentprotection %s", drm_info);
     }
