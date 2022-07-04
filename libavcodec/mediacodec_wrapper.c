@@ -1560,11 +1560,13 @@ int ff_AMediaCodec_queueSecureInputBuffer(FFAMediaCodec* codec, size_t idx, off_
     (*env)->SetByteArrayRegion(env, key, 0, info->keyLength, info->key);
     (*env)->CallVoidMethod(env, crypto_info, codec->jfields.method_CryptoInfo_set, info->numSubSamples, numBytesOfClearData, numBytesOfEncryptedData, key, iv, info->mode);
 
-    jstring cryptoInfoString = (*env)->CallObjectMethod(env, crypto_info, codec->jfields.method_CryptoInfo_toString);
-    const char* c_str = (*env)->GetStringUTFChars(env, cryptoInfoString, NULL);
-    av_log(NULL, AV_LOG_DEBUG, "ff_AMediaCodec_queueSecureInputBuffer cryptoInfoString: '%s'", c_str);
-    (*env)->ReleaseStringUTFChars(env, cryptoInfoString, c_str);
-    (*env)->DeleteLocalRef(env, cryptoInfoString);
+    if (av_log_get_level() <= AV_LOG_DEBUG) {
+        jstring cryptoInfoString = (*env)->CallObjectMethod(env, crypto_info, codec->jfields.method_CryptoInfo_toString);
+        const char* c_str = (*env)->GetStringUTFChars(env, cryptoInfoString, NULL);
+        av_log(NULL, AV_LOG_DEBUG, "ff_AMediaCodec_queueSecureInputBuffer cryptoInfoString: '%s'", c_str);
+        (*env)->ReleaseStringUTFChars(env, cryptoInfoString, c_str);
+        (*env)->DeleteLocalRef(env, cryptoInfoString);
+    }
 
     (*env)->CallVoidMethod(env, codec->object, codec->jfields.queue_secure_input_buffer_id, (jint)idx, (jint)offset, crypto_info, time, flags);
 

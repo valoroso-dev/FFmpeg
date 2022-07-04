@@ -303,6 +303,7 @@ static int vpx_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
 }
 #endif
 
+#if CONFIG_AAC_MEDIACODEC_DECODER || CONFIG_AAC_LATM_MEDIACODEC_DECODER
 static int aac_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
 {
     int ret = 0;
@@ -313,6 +314,7 @@ static int aac_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
 
     return ret;
 }
+#endif
 
 static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
 {
@@ -385,6 +387,7 @@ static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
             goto done;
         break;
 #endif
+#if CONFIG_AAC_MEDIACODEC_DECODER || CONFIG_AAC_LATM_MEDIACODEC_DECODER
     case AV_CODEC_ID_AAC:
     case AV_CODEC_ID_AAC_LATM:
         codec_mime = "audio/mp4a-latm";
@@ -393,6 +396,7 @@ static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
         if (ret < 0)
             goto done;
         break;
+#endif
     default:
         av_assert0(0);
     }
@@ -635,6 +639,7 @@ AVCodec ff_vp9_mediacodec_decoder = {
 };
 #endif
 
+#ifdef CONFIG_AAC_MEDIACODEC_DECODER
 AVCodec ff_aac_mediacodec_decoder = {
     .name           = "aac_mediacodec",
     .long_name      = NULL_IF_CONFIG_SMALL("AAC Android MediaCodec decoder"),
@@ -648,7 +653,9 @@ AVCodec ff_aac_mediacodec_decoder = {
     .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
     .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS,
 };
+#endif
 
+#ifdef CONFIG_AAC_LATM_MEDIACODEC_DECODER
 AVCodec ff_aac_latm_mediacodec_decoder = {
     .name           = "aac_latm_mediacodec",
     .long_name      = NULL_IF_CONFIG_SMALL("AAC LATM Android MediaCodec decoder"),
@@ -662,3 +669,4 @@ AVCodec ff_aac_latm_mediacodec_decoder = {
     .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
     .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS,
 };
+#endif
