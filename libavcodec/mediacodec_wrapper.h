@@ -88,6 +88,8 @@ struct FFAMediaCodecCryptoInfo {
     int32_t *numBytesOfClearData;
     int64_t *numBytesOfEncryptedData;
     uint32_t numSubSamples;
+    uint8_t encryptBlocks;
+    uint8_t skipBlocks;
 };
 typedef struct FFAMediaCodecCryptoInfo FFAMediaCodecCryptoInfo;
 

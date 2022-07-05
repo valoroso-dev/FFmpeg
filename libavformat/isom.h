@@ -128,12 +128,16 @@ typedef struct MOVIndexRange {
 } MOVIndexRange;
 
 typedef struct MOVDrmContext {
-    unsigned int scheme_type;
+    uint8_t scheme_type;
     unsigned int scheme_version;
     char *scheme_uri;
-    unsigned int default_is_encrypted;
+    uint8_t default_is_encrypted;
+    uint8_t default_crypto_byte_block;
+    uint8_t default_skip_byte_block;
     uint8_t default_iv_size;
     uint8_t default_kid[16];
+    uint8_t default_constant_iv_size;
+    uint8_t *default_constant_iv;
 } MOVDrmContext;
 
 typedef struct MOVStreamContext {

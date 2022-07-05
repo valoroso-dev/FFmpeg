@@ -5194,7 +5194,18 @@ static int mov_read_schm(MOVContext *c, AVIOContext *pb, MOVAtom atom) {
     sc->drm_context = av_mallocz(sizeof(MOVDrmContext));
     avio_r8(pb); /* version */
     int32_t has_scheme_uri = avio_rb24(pb) & 0x01; /* flags */
-    sc->drm_context->scheme_type = avio_rb32(pb);
+    uint32_t scheme_type = avio_rl32(pb);
+    if (scheme_type == MKTAG('c','e','n','c')) {
+        sc->drm_context->scheme_type = 1;
+    } else if (scheme_type == MKTAG('c','b','c','1')) {
+        sc->drm_context->scheme_type = 2;
+    } else if (scheme_type == MKTAG('c','e','n','s')) {
+        sc->drm_context->scheme_type = 3;
+    } else if (scheme_type == MKTAG('c','b','c','s')) {
+        sc->drm_context->scheme_type = 4;
+    } else {
+        sc->drm_context->scheme_type = 0;
+    }
     sc->drm_context->scheme_version = avio_rb32(pb);
     if (has_scheme_uri) {
         int32_t uri_len = atom.size - 20;
@@ -5214,6 +5225,7 @@ static int mov_read_tenc(MOVContext *c, AVIOContext *pb, MOVAtom atom) {
     AVStream *st;
     MOVStreamContext *sc;
     int ret;
+    uint8_t pattern;
 
     if (c->fc->nb_streams < 1)
         return 0;
@@ -5225,16 +5237,34 @@ static int mov_read_tenc(MOVContext *c, AVIOContext *pb, MOVAtom atom) {
         av_log(c->fc, AV_LOG_ERROR, "must read schm box first");
         return 0;
     }
-    avio_r8(pb); /* version */
+    uint8_t version = avio_r8(pb); /* version */
     avio_rb24(pb); /* flags */
-    sc->drm_context->default_is_encrypted = avio_rb24(pb);
+    avio_r8(pb); /* reserved */
+    if (version == 0) {
+        avio_r8(pb); /* reserved */
+        pattern = 0;
+        sc->drm_context->default_crypto_byte_block = 0;
+        sc->drm_context->default_skip_byte_block = 0;
+    } else {
+        pattern = avio_r8(pb); /* pattern */
+        sc->drm_context->default_crypto_byte_block = (pattern & 0xF0) >> 4;
+        sc->drm_context->default_skip_byte_block = (pattern & 0x0F);
+    }
+    sc->drm_context->default_is_encrypted = avio_r8(pb);
     sc->drm_context->default_iv_size = avio_r8(pb);
     ret = ffio_read_size(pb, sc->drm_context->default_kid, 16);
     if (ret < 0)
         return ret;
+    if (sc->drm_context->default_is_encrypted && sc->drm_context->default_iv_size == 0) {
+        sc->drm_context->default_constant_iv_size = avio_r8(pb);
+        sc->drm_context->default_constant_iv = av_mallocz(sc->drm_context->default_constant_iv_size);
+        ret = ffio_read_size(pb, sc->drm_context->default_constant_iv, sc->drm_context->default_constant_iv_size);
+        if (ret < 0)
+            return ret;
+    }
 
-    av_log(c->fc, AV_LOG_INFO, "mov_read_tenc is_encrypted=%d,iv_size=%d,kid=%s", sc->drm_context->default_is_encrypted,
-            sc->drm_context->default_iv_size, sc->drm_context->default_kid);
+    av_log(c->fc, AV_LOG_INFO, "mov_read_tenc is_encrypted=%d,pattern=%d,kid=%s,constant_iv=%s", sc->drm_context->default_is_encrypted,
+            pattern, sc->drm_context->default_kid, sc->drm_context->default_constant_iv);
     return 0;
 }
 
@@ -5442,34 +5472,83 @@ static int read_cenc_data(MOVContext *c, MOVStreamContext *sc, int64_t index, AV
     uint8_t *side;
     int ret;
 
-    if (index != sc->cenc.auxiliary_info_index) {
-        ret = mov_seek_auxiliary_info(c, sc, index);
-        if (ret < 0) {
-            return ret;
-        }
+    if (!sc->cenc.encrypted_sample_count || index - sc->cenc.encrypted_sample_start_index > sc->cenc.encrypted_sample_count) {
+        return 0;
     }
 
-    if (sc->cenc.auxiliary_info_default_size > 0) {
+    uint32_t iv_size;
+    uint32_t subsample_size;
+    uint32_t total_size;
+    if (sc->drm_context->default_iv_size) {
+        iv_size = sc->drm_context->default_iv_size;
+    } else {
+        iv_size = sc->drm_context->default_constant_iv_size;
+    }
+    if (sc->cenc.use_subsamples) {
+        subsample_size = sc->cenc.auxiliary_info_default_size - sc->drm_context->default_iv_size;
+    } else {
+        subsample_size = 8;
+    }
+    total_size = 4 + iv_size + subsample_size + 16;
+
+    side = av_packet_new_side_data(pkt,
+                                   AV_PKT_DATA_DRM_KEY,
+                                   total_size);
+    if (!side)
+        return AVERROR(ENOMEM);
+
+    side[0] = iv_size | (sc->cenc.use_subsamples ? 0x80 : 0);
+    side[1] = sc->drm_context->scheme_type;
+    side[2] = sc->drm_context->default_crypto_byte_block;
+    side[3] = sc->drm_context->default_skip_byte_block;
+    side += 4;
+
+    if (sc->drm_context->default_iv_size || sc->cenc.use_subsamples) {
+        if (index != sc->cenc.auxiliary_info_index) {
+            ret = mov_seek_auxiliary_info(c, sc, index);
+            if (ret < 0) {
+                return ret;
+            }
+        }
+
         if (sc->cenc.auxiliary_info_default_size > sc->cenc.auxiliary_info_end - sc->cenc.auxiliary_info_pos) {
             av_log(c->fc, AV_LOG_ERROR, "failed to read cenc data from the auxiliary info %"PRId64" %"PRId64"\n", index, sc->cenc.auxiliary_info_index);
             return AVERROR_INVALIDDATA;
         }
-
-        uint32_t total_size = 1 + sc->cenc.auxiliary_info_default_size + 16;
-        side = av_packet_new_side_data(pkt,
-                                       AV_PKT_DATA_DRM_KEY,
-                                       total_size);
-        if (!side)
-            return AVERROR(ENOMEM);
-        side[0] = sc->drm_context->default_iv_size | (sc->cenc.use_subsamples ? 0x80 : 0);
-        memcpy(side + 1, sc->cenc.auxiliary_info_pos, sc->cenc.auxiliary_info_default_size);
-        sc->cenc.auxiliary_info_pos += sc->cenc.auxiliary_info_default_size;
         sc->cenc.auxiliary_info_index++;
-
-        memcpy(side + 1 + sc->cenc.auxiliary_info_default_size, sc->drm_context->default_kid, 16);
-
-        pkt->flags |= AV_PKT_FLAG_ENCRYPTED;
     }
+
+    if (sc->drm_context->default_iv_size) {
+        memcpy(side, sc->cenc.auxiliary_info_pos, sc->drm_context->default_iv_size);
+        sc->cenc.auxiliary_info_pos += sc->drm_context->default_iv_size;
+        side += sc->drm_context->default_iv_size;
+    } else {
+        memcpy(side, sc->drm_context->default_constant_iv, sc->drm_context->default_constant_iv_size);
+        side += sc->drm_context->default_constant_iv_size;
+    }
+
+    if (sc->cenc.use_subsamples) {
+        memcpy(side, sc->cenc.auxiliary_info_pos, subsample_size);
+        sc->cenc.auxiliary_info_pos += subsample_size;
+        side += subsample_size;
+    } else {
+        // subsampleCount = 1 (unsigned short)
+        side[0] = 0;
+        side[1] = 1;
+        // clearDataSize = clearHeaderSize (unsigned short)
+        side[2] = 0;
+        side[3] = 0;
+        // encryptedDataSize = sampleSize (unsigned int)
+        side[4] = (pkt->size >> 24) & 0xFF;
+        side[5] = (pkt->size >> 16) & 0xFF;
+        side[6] = (pkt->size >> 8) & 0xFF;
+        side[7] = (pkt->size & 0xFF);
+        side += 8;
+    }
+
+    memcpy(side, sc->drm_context->default_kid, 16);
+
+    pkt->flags |= AV_PKT_FLAG_ENCRYPTED;
 
     return 0;
 }
@@ -6113,6 +6192,9 @@ static int mov_read_close(AVFormatContext *s)
         av_freep(&sc->coll);
         if (sc->drm_context) {
             av_freep(&sc->drm_context->scheme_uri);
+            if (sc->drm_context->default_constant_iv_size > 0) {
+                av_freep(&sc->drm_context->default_constant_iv);
+            }
         }
         av_freep(&sc->drm_context);
     }

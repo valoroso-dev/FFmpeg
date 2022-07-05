@@ -1745,11 +1745,13 @@ static int dash_read_header(AVFormatContext *s)
 
     if (drm_holder && (*drm_holder)) {
         char *drm_info = *drm_holder;
-        if (c->cp_audio) {
-            sprintf(drm_info, "audio,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
-        }
-        if (c->cp_video) {
-            sprintf(drm_info, "%s;video,%s,%s,%s", drm_info, c->cp_audio->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
+        if (c->cp_audio && c->cp_video) {
+            sprintf(drm_info, "audio,%s,%s,%s;video,%s,%s,%s\0", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh,
+                                                               c->cp_audio->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
+        } else if (c->cp_audio) {
+            sprintf(drm_info, "audio,%s,%s,%s\0", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
+        } else if (c->cp_video) {
+            sprintf(drm_info, "video,%s,%s,%s\0", c->cp_audio->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
         }
         av_log(s, AV_LOG_WARNING, "read contentprotection %s", drm_info);
     }

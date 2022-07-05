@@ -222,6 +222,12 @@ struct JNIAMediaCodecFields {
     jmethodID constructor_CryptoInfo;
     jmethodID method_CryptoInfo_set;
     jmethodID method_CryptoInfo_toString;
+    jmethodID method_CryptoInfo_setPattern;
+
+    jclass cryptoinfo_pattern_class;
+
+    jmethodID constructor_cryptoinfo_Pattern;
+    jmethodID method_cryptoinfo_Pattern_set;
 };
 
 static const struct FFJniField jni_amediacodec_mapping[] = {
@@ -282,6 +288,12 @@ static const struct FFJniField jni_amediacodec_mapping[] = {
         { "android/media/MediaCodec.CryptoInfo", "<init>", "()V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, constructor_CryptoInfo), 1 },
         { "android/media/MediaCodec.CryptoInfo", "set", "(I[I[I[B[BI)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_CryptoInfo_set), 1 },
         { "android/media/MediaCodec.CryptoInfo", "toString", "()Ljava/lang/String;", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_CryptoInfo_toString), 1 },
+        { "android/media/MediaCodec.CryptoInfo.Pattern", "setPattern", "(Landroid/media/MediaCodec$CryptoInfo$Pattern;)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_CryptoInfo_setPattern), 1 },
+
+    { "android/media/MediaCodec$CryptoInfo$Pattern", NULL, NULL, FF_JNI_CLASS, offsetof(struct JNIAMediaCodecFields, cryptoinfo_pattern_class), 1 },
+
+        { "android/media/MediaCodec.CryptoInfo.Pattern", "<init>", "(II)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, constructor_cryptoinfo_Pattern), 1 },
+        { "android/media/MediaCodec.CryptoInfo.Pattern", "set", "(II)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_cryptoinfo_Pattern_set), 1 },
 
     { NULL }
 };
@@ -1541,6 +1553,7 @@ int ff_AMediaCodec_queueSecureInputBuffer(FFAMediaCodec* codec, size_t idx, off_
     JNIEnv *env = NULL;
 
     jobject crypto_info = NULL;
+    jobject crypto_pattern= NULL;
 
     JNI_GET_ENV_OR_RETURN(env, codec, AVERROR_EXTERNAL);
 
@@ -1560,6 +1573,16 @@ int ff_AMediaCodec_queueSecureInputBuffer(FFAMediaCodec* codec, size_t idx, off_
     (*env)->SetByteArrayRegion(env, key, 0, info->keyLength, info->key);
     (*env)->CallVoidMethod(env, crypto_info, codec->jfields.method_CryptoInfo_set, info->numSubSamples, numBytesOfClearData, numBytesOfEncryptedData, key, iv, info->mode);
 
+    if (/*J4A_GetSystemAndroidApiLevel(env) >= 24 && */(info->encryptBlocks || info->skipBlocks)) {
+        crypto_pattern = (*env)->NewObject(env, codec->jfields.cryptoinfo_pattern_class, codec->jfields.constructor_cryptoinfo_Pattern,
+            info->encryptBlocks, info->skipBlocks);
+        if (ff_jni_exception_check(env, 1, codec) < 0) {
+            ret = AVERROR_EXTERNAL;
+            goto fail;
+        }
+        (*env)->CallVoidMethod(env, crypto_info, codec->jfields.method_CryptoInfo_setPattern, crypto_pattern);
+    }
+
     if (av_log_get_level() <= AV_LOG_DEBUG) {
         jstring cryptoInfoString = (*env)->CallObjectMethod(env, crypto_info, codec->jfields.method_CryptoInfo_toString);
         const char* c_str = (*env)->GetStringUTFChars(env, cryptoInfoString, NULL);
@@ -1574,6 +1597,7 @@ int ff_AMediaCodec_queueSecureInputBuffer(FFAMediaCodec* codec, size_t idx, off_
     (*env)->DeleteLocalRef(env, numBytesOfEncryptedData);
     (*env)->DeleteLocalRef(env, iv);
     (*env)->DeleteLocalRef(env, key);
+    (*env)->DeleteLocalRef(env, crypto_pattern);
     (*env)->DeleteLocalRef(env, crypto_info);
     if ((ret = ff_jni_exception_check(env, 1, codec)) < 0) {
         ret = AVERROR_EXTERNAL;
@@ -1821,7 +1845,6 @@ FFAMediaCodecCryptoInfo* ff_AMediaCodec_CryptoInfo_new()
     crypto_info->iv = av_mallocz(crypto_info->ivLength);
     crypto_info->keyLength = 16;
     crypto_info->key = av_mallocz(crypto_info->keyLength);
-    crypto_info->mode = 1;
     crypto_info->numSubSamples = 0;
     av_log(NULL, AV_LOG_WARNING, "ff_AMediaCodec_CryptoInfo_new %p\n", crypto_info);
     return crypto_info;
@@ -1843,19 +1866,28 @@ int ff_AMediaCodec_CryptoInfo_fill(uint8_t *key_data, uint32_t key_data_size, FF
     FFAMediaCodecCryptoInfo *out = *crypto_info;
     uint8_t iv_size = key_data[0] & 0x7F;
     uint8_t is_encrypted = key_data[0] & 0x80;
-    key_data += 1;
+    uint8_t scheme_type= key_data[1];
+    uint8_t default_crypto_byte_block = key_data[2];
+    uint8_t default_skip_byte_block = key_data[3];
+    key_data += 4;
+
+    if (scheme_type == 1 || scheme_type == 3) {
+        out->mode = 1;
+    } else if (scheme_type == 2 || scheme_type == 4) {
+        out->mode = 2;
+    } else {
+        out->mode = 0;
+    }
+    out->encryptBlocks = default_crypto_byte_block;
+    out->skipBlocks = default_skip_byte_block;
 
     memset(out->iv, 0, out->ivLength);
     memcpy(out->iv, key_data, iv_size);
     key_data += iv_size;
 
     uint32_t subsample_count;
-    if (is_encrypted) {
-        subsample_count = key_data[0] * 256 + key_data[1];
-        key_data += 2;
-    } else {
-        subsample_count = 1;
-    }
+    subsample_count = key_data[0] * 256 + key_data[1];
+    key_data += 2;
 
     if (subsample_count > out->numSubSamples) {
         av_freep(&out->numBytesOfClearData);
@@ -1865,16 +1897,11 @@ int ff_AMediaCodec_CryptoInfo_fill(uint8_t *key_data, uint32_t key_data_size, FF
     }
     out->numSubSamples = subsample_count;
 
-    if (is_encrypted) {
-        for (int i = 0; i < subsample_count; i++) {
-            out->numBytesOfClearData[i] = key_data[0] * 256 + key_data[1];
-            key_data += 2;
-            out->numBytesOfEncryptedData[i] = key_data[0] * 256 * 256 * 256 + key_data[1] * 256 * 256 + key_data[2] * 256 + key_data[3];
-            key_data += 4;
-        }
-    } else {
-        out->numBytesOfClearData[0] = 0;
-        out->numBytesOfEncryptedData[0] = av_data_len;
+    for (int i = 0; i < subsample_count; i++) {
+        out->numBytesOfClearData[i] = key_data[0] * 256 + key_data[1];
+        key_data += 2;
+        out->numBytesOfEncryptedData[i] = key_data[0] * 256 * 256 * 256 + key_data[1] * 256 * 256 + key_data[2] * 256 + key_data[3];
+        key_data += 4;
     }
 
     memset(out->key, 0, out->keyLength);
