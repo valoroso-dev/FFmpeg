@@ -2817,6 +2817,68 @@ static int mov_read_sbgp(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     return pb->eof_reached ? AVERROR_EOF : 0;
 }
 
+static int mov_read_sgpd(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
+    AVStream *st;
+    MOVStreamContext *sc;
+    unsigned int i, entries;
+    uint8_t version;
+    uint32_t grouping_type;
+    uint32_t description;
+    uint8_t pattern;
+    uint8_t new_constant_iv_size;
+    int ret;
+
+    if (c->fc->nb_streams < 1)
+        return 0;
+    st = c->fc->streams[c->fc->nb_streams-1];
+    sc = st->priv_data;
+
+    version = avio_r8(pb); /* version */
+    avio_rb24(pb); /* flags */
+    grouping_type = avio_rl32(pb);
+    if (grouping_type != MKTAG('s','e','i','g'))
+        return 0; /* only support 'seig' grouping */
+    if (version == 1) {
+        description = avio_rl32(pb);
+        if (description == 0)
+            return AVERROR_INVALIDDATA; /* Variable length description in sgpd found (unsupported) */
+    } else if (version >= 2) {
+        avio_rb32(pb); /* default_sample_description_index */
+    }
+
+    entries = avio_rb32(pb);
+    if (entries != 1)
+        return AVERROR_INVALIDDATA; /* Entry count in sgpd != 1 (unsupported). */
+
+    avio_r8(pb); /* reserved = 0. */
+    pattern = avio_r8(pb); /* pattern */
+    sc->drm_context->default_crypto_byte_block = (pattern & 0xF0) >> 4;
+    sc->drm_context->default_skip_byte_block = (pattern & 0x0F);
+    sc->drm_context->default_is_encrypted = avio_r8(pb);
+    if (!sc->drm_context->default_is_encrypted)
+        return 0;
+    sc->drm_context->default_iv_size = avio_r8(pb);
+    ret = ffio_read_size(pb, sc->drm_context->default_kid, 16);
+    if (!ret)
+        return ret;
+    if (sc->drm_context->default_iv_size == 0) {
+        new_constant_iv_size = avio_r8(pb);
+        if (new_constant_iv_size != sc->drm_context->default_constant_iv_size) {
+            av_freep(sc->drm_context->default_constant_iv);
+            sc->drm_context->default_constant_iv = av_mallocz(new_constant_iv_size);
+            sc->drm_context->default_constant_iv_size = new_constant_iv_size;
+        }
+        ret = ffio_read_size(pb, sc->drm_context->default_constant_iv, sc->drm_context->default_constant_iv_size);
+        if (ret < 0)
+            return ret;
+    }
+    av_log(c->fc, AV_LOG_INFO, "mov_read_sgpd is_encrypted=%d,pattern=%d,kid=%s,constant_iv=%s", sc->drm_context->default_is_encrypted,
+            pattern, sc->drm_context->default_kid, sc->drm_context->default_constant_iv);
+
+    return 0;
+}
+
 /**
  * Get ith edit list entry (media time, duration).
  */
@@ -5221,7 +5283,43 @@ static int mov_read_schm(MOVContext *c, AVIOContext *pb, MOVAtom atom) {
     return 0;
 }
 
-static int mov_read_tenc(MOVContext *c, AVIOContext *pb, MOVAtom atom) {
+static int mov_read_pssh(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
+    AVStream *st;
+    MOVStreamContext *sc;
+    int ret;
+
+    if (c->fc->nb_streams < 1)
+        return 0;
+
+    st = c->fc->streams[c->fc->nb_streams - 1];
+    sc = st->priv_data;
+
+    if (!sc->drm_context) {
+        av_log(c->fc, AV_LOG_ERROR, "must read schm box first");
+        return 0;
+    }
+    uint8_t version = avio_r8(pb); /* version */
+    avio_rb24(pb); /* flags */
+    ret = ffio_read_size(pb, sc->drm_context->uuid, 16);
+    if (ret < 0)
+        return ret;
+    if (version > 0) {
+        uint32_t kid_count = avio_rb32(pb);
+        avio_skip(pb, kid_count * 16);
+    }
+    sc->drm_context->pssh_data_size = avio_rb32(pb);
+    sc->drm_context->pssh_data = av_mallocz(sc->drm_context->pssh_data_size);
+    ret = ffio_read_size(pb, sc->drm_context->pssh_data, sc->drm_context->pssh_data_size);
+    if (ret < 0)
+        return ret;
+
+    av_log(c->fc, AV_LOG_INFO, "mov_read_pssh uuid=%s,pssh=%s", sc->drm_context->uuid, sc->drm_context->pssh_data);
+    return 0;
+}
+
+static int mov_read_tenc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
     AVStream *st;
     MOVStreamContext *sc;
     int ret;
@@ -5745,6 +5843,7 @@ static const MOVParseTableEntry mov_default_parse_table[] = {
 { MKTAG('c','h','a','n'), mov_read_chan }, /* channel layout */
 { MKTAG('d','v','c','1'), mov_read_dvc1 },
 { MKTAG('s','b','g','p'), mov_read_sbgp },
+{ MKTAG('s','g','p','d'), mov_read_sgpd },
 { MKTAG('h','v','c','C'), mov_read_glbl },
 { MKTAG('u','u','i','d'), mov_read_uuid },
 { MKTAG('C','i','n', 0x8e), mov_read_targa_y216 },
@@ -5755,6 +5854,7 @@ static const MOVParseTableEntry mov_default_parse_table[] = {
 { MKTAG('s','c','h','m'), mov_read_schm },
 { MKTAG('s','c','h','i'), mov_read_default },
 { MKTAG('t','e','n','c'), mov_read_tenc },
+{ MKTAG('p','s','s','h'), mov_read_pssh },
 { MKTAG('s','e','n','c'), mov_read_senc },
 { MKTAG('s','a','i','z'), mov_read_saiz },
 { MKTAG('d','f','L','a'), mov_read_dfla },
@@ -6194,6 +6294,9 @@ static int mov_read_close(AVFormatContext *s)
             av_freep(&sc->drm_context->scheme_uri);
             if (sc->drm_context->default_constant_iv_size > 0) {
                 av_freep(&sc->drm_context->default_constant_iv);
+            }
+            if (sc->drm_context->pssh_data_size > 0) {
+                av_freep(&sc->drm_context->pssh_data);
             }
         }
         av_freep(&sc->drm_context);
