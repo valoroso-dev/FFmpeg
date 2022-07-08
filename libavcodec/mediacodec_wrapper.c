@@ -288,12 +288,12 @@ static const struct FFJniField jni_amediacodec_mapping[] = {
         { "android/media/MediaCodec.CryptoInfo", "<init>", "()V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, constructor_CryptoInfo), 1 },
         { "android/media/MediaCodec.CryptoInfo", "set", "(I[I[I[B[BI)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_CryptoInfo_set), 1 },
         { "android/media/MediaCodec.CryptoInfo", "toString", "()Ljava/lang/String;", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_CryptoInfo_toString), 1 },
-        { "android/media/MediaCodec.CryptoInfo.Pattern", "setPattern", "(Landroid/media/MediaCodec$CryptoInfo$Pattern;)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_CryptoInfo_setPattern), 1 },
+        { "android/media/MediaCodec.CryptoInfo.Pattern", "setPattern", "(Landroid/media/MediaCodec$CryptoInfo$Pattern;)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_CryptoInfo_setPattern), 0 },
 
-    { "android/media/MediaCodec$CryptoInfo$Pattern", NULL, NULL, FF_JNI_CLASS, offsetof(struct JNIAMediaCodecFields, cryptoinfo_pattern_class), 1 },
+    { "android/media/MediaCodec$CryptoInfo$Pattern", NULL, NULL, FF_JNI_CLASS, offsetof(struct JNIAMediaCodecFields, cryptoinfo_pattern_class), 0 },
 
-        { "android/media/MediaCodec.CryptoInfo.Pattern", "<init>", "(II)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, constructor_cryptoinfo_Pattern), 1 },
-        { "android/media/MediaCodec.CryptoInfo.Pattern", "set", "(II)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_cryptoinfo_Pattern_set), 1 },
+        { "android/media/MediaCodec.CryptoInfo.Pattern", "<init>", "(II)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, constructor_cryptoinfo_Pattern), 0 },
+        { "android/media/MediaCodec.CryptoInfo.Pattern", "set", "(II)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_cryptoinfo_Pattern_set), 0 },
 
     { NULL }
 };
