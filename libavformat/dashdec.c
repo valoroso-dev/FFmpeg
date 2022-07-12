@@ -343,7 +343,21 @@ static void free_representation(struct representation *pls)
     av_freep(pls);
 }
 
-static void free_contentprotection(struct contentprotection *con) {
+static struct contentprotection* new_contentprotection()
+{
+    struct contentprotection *out;
+    out = av_mallocz(sizeof(struct contentprotection));
+    out->media_type = AVMEDIA_TYPE_UNKNOWN;
+    out->scheme_type = av_strdup("unknown");
+    out->scheme_id_uri = av_strdup("unknown");
+    out->default_kid = av_strdup("unknown");
+    out->cenc_pssh = av_strdup("unknown");
+    av_log(NULL, AV_LOG_WARNING, "new contentprotection");
+    return out;
+}
+
+static void free_contentprotection(struct contentprotection *con)
+{
     av_freep(&con->scheme_type);
     av_freep(&con->scheme_id_uri);
     av_freep(&con->default_kid);
@@ -611,17 +625,21 @@ static int parse_manifest_contentprotection(AVFormatContext *s, struct contentpr
     if (!av_strcasecmp(scheme_id_uri, (const char *)"urn:mpeg:dash:mp4protection:2011")) {
         // parse scheme type
         char *scheme_type = xmlGetProp(contentprotection_node, "value");
-        if (con->scheme_type) {
-            av_freep(&con->scheme_type);
+        if (scheme_type) {
+            if (con->scheme_type) {
+                av_freep(&con->scheme_type);
+            }
+            con->scheme_type = av_strdup(scheme_type);
         }
-        con->scheme_type = av_strdup(scheme_type);
 
         char *default_kid = xmlGetProp(contentprotection_node, "default_KID");
-        if (con->default_kid) {
-            av_freep(&con->default_kid);
+        if (default_kid) {
+            if (con->default_kid) {
+                av_freep(&con->default_kid);
+            }
+            con->default_kid = av_strdup(default_kid);
         }
-        con->default_kid = av_strdup(default_kid);
-        av_log(s, AV_LOG_WARNING, "parse manifest contentprotection scheme ctype %s %s %d", con->scheme_type, con->default_kid, con->media_type);
+        av_log(s, AV_LOG_WARNING, "parse manifest contentprotection scheme type %s %s %d", con->scheme_type, con->default_kid, con->media_type);
         return 0;
     } else if (!av_strcasecmp(scheme_id_uri, (const char *)"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed")) {
         contentprotection_cenc_pssh_node = find_child_node_by_name(contentprotection_node, "pssh");
@@ -631,10 +649,12 @@ static int parse_manifest_contentprotection(AVFormatContext *s, struct contentpr
                 av_freep(&con->scheme_id_uri);
             }
             con->scheme_id_uri = av_strdup(scheme_id_uri);
-            if (con->cenc_pssh) {
-                av_freep(&con->cenc_pssh);
+            if (text) {
+                if (con->cenc_pssh) {
+                    av_freep(&con->cenc_pssh);
+                }
+                con->cenc_pssh = av_strdup(text);
             }
-            con->cenc_pssh = av_strdup(text);
             con->media_type = type;
             av_log(s, AV_LOG_WARNING, "parse manifest contentprotection %s %s %s %s %d",
                 con->scheme_type, con->scheme_id_uri, con->default_kid, con->cenc_pssh, con->media_type);
@@ -916,12 +936,12 @@ static int parse_manifest_adaptationset(AVFormatContext *s, const char *url,
             enum AVMediaType type = get_content_type(adaptionset_node);
             if (type == AVMEDIA_TYPE_VIDEO) {
                 if (!c->cp_video) {
-                    c->cp_video = av_mallocz(sizeof(struct contentprotection));
+                    c->cp_video = new_contentprotection();
                 }
                 parse_manifest_contentprotection(s, c->cp_video, node, AVMEDIA_TYPE_VIDEO);
             } else if (type == AVMEDIA_TYPE_AUDIO) {
                 if (!c->cp_audio) {
-                    c->cp_audio = av_mallocz(sizeof(struct contentprotection));
+                    c->cp_audio = new_contentprotection();
                 }
                 parse_manifest_contentprotection(s, c->cp_audio, node, AVMEDIA_TYPE_AUDIO);
             }
@@ -1751,7 +1771,7 @@ static int dash_read_header(AVFormatContext *s)
         } else if (c->cp_audio) {
             sprintf(drm_info, "audio,%s,%s,%s\0", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
         } else if (c->cp_video) {
-            sprintf(drm_info, "video,%s,%s,%s\0", c->cp_audio->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
+            sprintf(drm_info, "video,%s,%s,%s\0", c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
         }
         av_log(s, AV_LOG_WARNING, "read contentprotection %s", drm_info);
     }

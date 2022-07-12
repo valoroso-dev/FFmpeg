@@ -389,6 +389,7 @@ const char *av_packet_side_data_name(enum AVPacketSideDataType type)
     case AV_PKT_DATA_SPHERICAL:                  return "Spherical Mapping";
     case AV_PKT_DATA_A53_CC:                     return "A53 Closed Captions";
     case AV_PKT_DATA_DRM_KEY:                    return "Drm Key Info";
+    case AV_PKT_DATA_DRM_INIT_INFO:              return "Drm Init Info";
     }
     return NULL;
 }

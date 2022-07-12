@@ -28,6 +28,7 @@
 #include <stdint.h>
 
 #include "libavutil/attributes.h"
+#include "libavutil/base64.h"
 #include "libavutil/channel_layout.h"
 #include "libavutil/internal.h"
 #include "libavutil/intreadwrite.h"
@@ -2873,8 +2874,9 @@ static int mov_read_sgpd(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         if (ret < 0)
             return ret;
     }
-    av_log(c->fc, AV_LOG_INFO, "mov_read_sgpd is_encrypted=%d,pattern=%d,kid=%s,constant_iv=%s", sc->drm_context->default_is_encrypted,
-            pattern, sc->drm_context->default_kid, sc->drm_context->default_constant_iv);
+    sc->drm_context->has_new_updated = 1;
+    // av_log(c->fc, AV_LOG_INFO, "mov_read_sgpd is_encrypted=%d,pattern=%d,kid=%s,constant_iv=%s", sc->drm_context->default_is_encrypted,
+    //         pattern, sc->drm_context->default_kid, sc->drm_context->default_constant_iv);
 
     return 0;
 }
@@ -5238,7 +5240,8 @@ static int mov_read_frma(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     return 0;
 }
 
-static int mov_read_schm(MOVContext *c, AVIOContext *pb, MOVAtom atom) {
+static int mov_read_schm(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
     AVStream *st;
     MOVStreamContext *sc;
     int ret;
@@ -5301,18 +5304,43 @@ static int mov_read_pssh(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     }
     uint8_t version = avio_r8(pb); /* version */
     avio_rb24(pb); /* flags */
-    ret = ffio_read_size(pb, sc->drm_context->uuid, 16);
-    if (ret < 0)
-        return ret;
+    int64_t mostSigBits = avio_rb64(pb);
+    int64_t leastSigBits = avio_rb64(pb);
+    if (mostSigBits == 0xEDEF8BA979D64ACEL && leastSigBits == 0xA3C827DCD51D21EDL) {
+        // widevine
+        sc->drm_context->uuid = av_strdup("urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed");
+    } else if (mostSigBits == 0x9A04F07998404286L && leastSigBits == 0xAB92E65BE0885F95L) {
+        // playready
+        sc->drm_context->uuid = av_strdup("urn:uuid:9a04f079-9840-4286-ab92-e65be0885f95");
+    } else if (mostSigBits == 0xE2719D58A985B3C9L && leastSigBits == 0x781AB030AF78D30EL) {
+        // clearkey
+        sc->drm_context->uuid = av_strdup("urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e");
+    } else if (mostSigBits == 0x1077EFECC0B24D02L && leastSigBits == 0xACE33C1E52E2FB4BL) {
+        // common pssh uuid
+        // sc->drm_context->uuid = av_strdup("urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b");
+        av_log(c->fc, AV_LOG_ERROR, "unsupport common pssh uuid\n");
+        return 0;
+    } else {
+        av_log(c->fc, AV_LOG_ERROR, "unsupport unknown uuid\n");
+        return 0;
+    }
     if (version > 0) {
         uint32_t kid_count = avio_rb32(pb);
         avio_skip(pb, kid_count * 16);
     }
-    sc->drm_context->pssh_data_size = avio_rb32(pb);
-    sc->drm_context->pssh_data = av_mallocz(sc->drm_context->pssh_data_size);
-    ret = ffio_read_size(pb, sc->drm_context->pssh_data, sc->drm_context->pssh_data_size);
+    uint32_t pssh_data_size = avio_rb32(pb);
+    uint8_t *pssh_data = av_mallocz(pssh_data_size);
+    ret = ffio_read_size(pb, pssh_data, pssh_data_size);
     if (ret < 0)
         return ret;
+
+    sc->drm_context->pssh_data_size = AV_BASE64_SIZE(pssh_data_size);
+    sc->drm_context->pssh_data = av_mallocz(sc->drm_context->pssh_data_size + 1);
+    sc->drm_context->pssh_data[sc->drm_context->pssh_data_size] = 0;
+
+    if (!av_base64_encode(sc->drm_context->pssh_data, sc->drm_context->pssh_data_size, pssh_data, pssh_data_size))
+        return AVERROR(ENOMEM);
+    av_freep(&pssh_data);
 
     av_log(c->fc, AV_LOG_INFO, "mov_read_pssh uuid=%s,pssh=%s", sc->drm_context->uuid, sc->drm_context->pssh_data);
     return 0;
@@ -5562,6 +5590,46 @@ static int mov_seek_auxiliary_info(MOVContext *c, MOVStreamContext *sc, int64_t 
 
     sc->cenc.auxiliary_info_pos = sc->cenc.auxiliary_info + auxiliary_info_seek_offset;
     sc->cenc.auxiliary_info_index = index;
+    return 0;
+}
+
+static int read_drm_init_info(MOVContext *c, MOVStreamContext *sc, int64_t index, AVPacket *pkt)
+{
+    uint8_t *side;
+    char scheme_type[5];
+    char drm_init_info[1024];
+    uint32_t total_size;
+    int ret;
+
+    if (sc->drm_context->scheme_type == 1) {
+        sprintf(scheme_type, "%s", "cenc");
+    } else if (sc->drm_context->scheme_type == 2) {
+        sprintf(scheme_type, "%s", "cbc1");
+    } else if (sc->drm_context->scheme_type == 3) {
+        sprintf(scheme_type, "%s", "cens");
+    } else if (sc->drm_context->scheme_type == 4) {
+        sprintf(scheme_type, "%s", "cbcs");
+    } else {
+        sprintf(scheme_type, "%s", "cenc");
+    }
+
+    if (sc->width && sc->height) {
+        sprintf(drm_init_info, "video,%s,%s,%s\0", scheme_type, sc->drm_context->uuid, sc->drm_context->pssh_data);
+    } else {
+        sprintf(drm_init_info, "audio,%s,%s,%s\0", scheme_type, sc->drm_context->uuid, sc->drm_context->pssh_data);
+    }
+
+    total_size = strlen(drm_init_info) + 1;
+    side = av_packet_new_side_data(pkt,
+                                   AV_PKT_DATA_DRM_INIT_INFO,
+                                   total_size);
+    if (!side)
+        return AVERROR(ENOMEM);
+
+    memcpy(side, drm_init_info, total_size);
+    pkt->flags |= AV_PKT_FLAG_DRM_INIT_INFO;
+    av_log(c->fc, AV_LOG_INFO, "read_drm_init_info index=%"PRId64" drm_init_info=%s\n", index, drm_init_info);
+
     return 0;
 }
 
@@ -6298,6 +6366,9 @@ static int mov_read_close(AVFormatContext *s)
             if (sc->drm_context->pssh_data_size > 0) {
                 av_freep(&sc->drm_context->pssh_data);
             }
+            if (sc->drm_context->uuid) {
+                av_freep(&sc->drm_context->uuid);
+            }
         }
         av_freep(&sc->drm_context);
     }
@@ -6941,10 +7012,19 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
     if (mov->aax_mode)
         aax_filter(pkt->data, pkt->size, mov);
 
-    if (sc->drm_context && sc->cenc.encrypted_sample_count > 0) {
-        ret = read_cenc_data(mov, sc, current_index - sc->cenc.encrypted_sample_start_index, pkt);
-        if (ret) {
-            return ret;
+    if (sc->drm_context) {
+        if (sc->drm_context->has_new_updated) {
+            sc->drm_context->has_new_updated = 0;
+            ret = read_drm_init_info(mov, sc, current_index - sc->cenc.encrypted_sample_start_index, pkt);
+            if (ret) {
+                return ret;
+            }
+        }
+        if (sc->cenc.encrypted_sample_count > 0) {
+            ret = read_cenc_data(mov, sc, current_index - sc->cenc.encrypted_sample_start_index, pkt);
+            if (ret) {
+                return ret;
+            }
         }
     } else if (sc->cenc.aes_ctr) {
         ret = cenc_filter(mov, sc, current_index, pkt->data, pkt->size);
