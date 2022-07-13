@@ -128,7 +128,7 @@ typedef struct MOVIndexRange {
 } MOVIndexRange;
 
 typedef struct MOVDrmContext {
-    int has_new_updated;
+    int has_new_pssh_updated;
     uint8_t scheme_type;
     unsigned int scheme_version;
     char *scheme_uri;

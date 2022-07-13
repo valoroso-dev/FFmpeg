@@ -2874,7 +2874,6 @@ static int mov_read_sgpd(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         if (ret < 0)
             return ret;
     }
-    sc->drm_context->has_new_updated = 1;
     // av_log(c->fc, AV_LOG_INFO, "mov_read_sgpd is_encrypted=%d,pattern=%d,kid=%s,constant_iv=%s", sc->drm_context->default_is_encrypted,
     //         pattern, sc->drm_context->default_kid, sc->drm_context->default_constant_iv);
 
@@ -5341,6 +5340,7 @@ static int mov_read_pssh(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     if (!av_base64_encode(sc->drm_context->pssh_data, sc->drm_context->pssh_data_size, pssh_data, pssh_data_size))
         return AVERROR(ENOMEM);
     av_freep(&pssh_data);
+    sc->drm_context->has_new_pssh_updated = 1;
 
     av_log(c->fc, AV_LOG_INFO, "mov_read_pssh uuid=%s,pssh=%s", sc->drm_context->uuid, sc->drm_context->pssh_data);
     return 0;
@@ -7013,8 +7013,8 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
         aax_filter(pkt->data, pkt->size, mov);
 
     if (sc->drm_context) {
-        if (sc->drm_context->has_new_updated) {
-            sc->drm_context->has_new_updated = 0;
+        if (sc->drm_context->has_new_pssh_updated) {
+            sc->drm_context->has_new_pssh_updated = 0;
             ret = read_drm_init_info(mov, sc, current_index - sc->cenc.encrypted_sample_start_index, pkt);
             if (ret) {
                 return ret;
