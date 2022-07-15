@@ -100,4 +100,3 @@ typedef struct MediaCodecBuffer {
 } MediaCodecBuffer;
 
 #endif /* AVCODEC_MEDIACODECDEC_COMMON_H */
-

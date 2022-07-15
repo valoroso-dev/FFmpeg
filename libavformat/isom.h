@@ -128,16 +128,19 @@ typedef struct MOVIndexRange {
 } MOVIndexRange;
 
 typedef struct MOVDrmContext {
-    int has_new_pssh_updated;
+    // read from schm box
     uint8_t scheme_type;
-    unsigned int scheme_version;
+    uint32_t scheme_version;
     char *scheme_uri;
+    // read from pssh box
+    int has_new_pssh_updated;
     uint8_t *uuid;
     uint8_t *pssh_data;
     uint32_t pssh_data_size;
-    uint8_t default_is_encrypted;
+    // read from tenc box or sgpd box
     uint8_t default_crypto_byte_block;
     uint8_t default_skip_byte_block;
+    uint8_t default_is_encrypted;
     uint8_t default_iv_size;
     uint8_t default_kid[16];
     uint8_t default_constant_iv_size;
@@ -221,16 +224,19 @@ typedef struct MOVStreamContext {
 
     int has_sidx;  // If there is an sidx entry for this stream.
     struct {
+        // read from senc
         int use_subsamples;
         size_t encrypted_sample_count;
-        int encrypted_sample_start_index;
         uint8_t* auxiliary_info;
         uint8_t* auxiliary_info_end;
         uint8_t* auxiliary_info_pos;
+        // read from saiz
         uint8_t auxiliary_info_default_size;
         uint8_t* auxiliary_info_sizes;
         size_t auxiliary_info_sizes_count;
+
         int64_t auxiliary_info_index;
+        int64_t encrypted_sample_start_index;
         struct AVAESCTR* aes_ctr;
     } cenc;
 

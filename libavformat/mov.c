@@ -2859,10 +2859,12 @@ static int mov_read_sgpd(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     sc->drm_context->default_is_encrypted = avio_r8(pb);
     if (!sc->drm_context->default_is_encrypted)
         return 0;
+
     sc->drm_context->default_iv_size = avio_r8(pb);
     ret = ffio_read_size(pb, sc->drm_context->default_kid, 16);
     if (!ret)
         return ret;
+
     if (sc->drm_context->default_iv_size == 0) {
         new_constant_iv_size = avio_r8(pb);
         if (new_constant_iv_size != sc->drm_context->default_constant_iv_size) {
@@ -5244,6 +5246,7 @@ static int mov_read_schm(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     AVStream *st;
     MOVStreamContext *sc;
     int ret;
+    int has_scheme_uri;
 
     if (c->fc->nb_streams < 1)
         return 0;
@@ -5256,8 +5259,10 @@ static int mov_read_schm(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         return 0;
     }
     sc->drm_context = av_mallocz(sizeof(MOVDrmContext));
+
     avio_r8(pb); /* version */
-    int32_t has_scheme_uri = avio_rb24(pb) & 0x01; /* flags */
+    has_scheme_uri = avio_rb24(pb) & 0x01; /* flags */
+
     uint32_t scheme_type = avio_rl32(pb);
     if (scheme_type == MKTAG('c','e','n','c')) {
         sc->drm_context->scheme_type = 1;
@@ -5270,7 +5275,9 @@ static int mov_read_schm(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     } else {
         sc->drm_context->scheme_type = 0;
     }
+
     sc->drm_context->scheme_version = avio_rb32(pb);
+
     if (has_scheme_uri) {
         int32_t uri_len = atom.size - 20;
         sc->drm_context->scheme_uri = av_mallocz(uri_len);
@@ -5280,6 +5287,7 @@ static int mov_read_schm(MOVContext *c, AVIOContext *pb, MOVAtom atom)
             return ret;
         }
     }
+
     av_log(c->fc, AV_LOG_INFO, "mov_read_schm scheme_type=%d,scheme_version=%d,scheme_uri=%s", sc->drm_context->scheme_type,
             sc->drm_context->scheme_version, sc->drm_context->scheme_uri);
     return 0;
@@ -5301,8 +5309,10 @@ static int mov_read_pssh(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         av_log(c->fc, AV_LOG_ERROR, "must read schm box first");
         return 0;
     }
+
     uint8_t version = avio_r8(pb); /* version */
     avio_rb24(pb); /* flags */
+
     int64_t mostSigBits = avio_rb64(pb);
     int64_t leastSigBits = avio_rb64(pb);
     if (mostSigBits == 0xEDEF8BA979D64ACEL && leastSigBits == 0xA3C827DCD51D21EDL) {
@@ -5323,10 +5333,12 @@ static int mov_read_pssh(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         av_log(c->fc, AV_LOG_ERROR, "unsupport unknown uuid\n");
         return 0;
     }
+
     if (version > 0) {
         uint32_t kid_count = avio_rb32(pb);
         avio_skip(pb, kid_count * 16);
     }
+
     uint32_t pssh_data_size = avio_rb32(pb);
     uint8_t *pssh_data = av_mallocz(pssh_data_size);
     ret = ffio_read_size(pb, pssh_data, pssh_data_size);
@@ -5376,11 +5388,13 @@ static int mov_read_tenc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         sc->drm_context->default_crypto_byte_block = (pattern & 0xF0) >> 4;
         sc->drm_context->default_skip_byte_block = (pattern & 0x0F);
     }
+
     sc->drm_context->default_is_encrypted = avio_r8(pb);
     sc->drm_context->default_iv_size = avio_r8(pb);
     ret = ffio_read_size(pb, sc->drm_context->default_kid, 16);
     if (ret < 0)
         return ret;
+
     if (sc->drm_context->default_is_encrypted && sc->drm_context->default_iv_size == 0) {
         sc->drm_context->default_constant_iv_size = avio_r8(pb);
         sc->drm_context->default_constant_iv = av_mallocz(sc->drm_context->default_constant_iv_size);
@@ -5420,7 +5434,7 @@ static int mov_read_senc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     avio_r8(pb); /* version */
     sc->cenc.use_subsamples = avio_rb24(pb) & 0x02; /* flags */
 
-    sc->cenc.encrypted_sample_count = avio_rb32(pb);        /* entries */
+    sc->cenc.encrypted_sample_count = avio_rb32(pb); /* entries */
 
     if (atom.size < 8 || atom.size > FFMIN(INT_MAX, SIZE_MAX)) {
         av_log(c->fc, AV_LOG_ERROR, "senc atom size %"PRId64" invalid\n", atom.size);
