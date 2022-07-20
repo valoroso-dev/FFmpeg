@@ -616,12 +616,17 @@ static int parse_manifest_contentprotection(AVFormatContext *s, struct contentpr
                                             xmlNodePtr contentprotection_node, enum AVMediaType type) {
     xmlNodePtr contentprotection_cenc_pssh_node = NULL;
     char *text;
+    int has_get_valid_contentprotection = 0;
 
     if (!con) {
         return AVERROR(ENOMEM);
     }
 
     char *scheme_id_uri = xmlGetProp(contentprotection_node, "schemeIdUri");
+    if (!scheme_id_uri) {
+        return AVERROR(EINVAL);
+    }
+
     if (!av_strcasecmp(scheme_id_uri, (const char *)"urn:mpeg:dash:mp4protection:2011")) {
         // parse scheme type
         char *scheme_type = xmlGetProp(contentprotection_node, "value");
@@ -630,6 +635,7 @@ static int parse_manifest_contentprotection(AVFormatContext *s, struct contentpr
                 av_freep(&con->scheme_type);
             }
             con->scheme_type = av_strdup(scheme_type);
+            xmlFree(scheme_type);
         }
 
         char *default_kid = xmlGetProp(contentprotection_node, "default_KID");
@@ -638,30 +644,38 @@ static int parse_manifest_contentprotection(AVFormatContext *s, struct contentpr
                 av_freep(&con->default_kid);
             }
             con->default_kid = av_strdup(default_kid);
+            xmlFree(default_kid);
         }
         av_log(s, AV_LOG_WARNING, "parse manifest contentprotection scheme type %s %s %d", con->scheme_type, con->default_kid, con->media_type);
-        return 0;
+        has_get_valid_contentprotection = 1;
     } else if (!av_strcasecmp(scheme_id_uri, (const char *)"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed")) {
+        if (con->scheme_id_uri) {
+            av_freep(&con->scheme_id_uri);
+        }
+        con->scheme_id_uri = av_strdup(scheme_id_uri);
+
         contentprotection_cenc_pssh_node = find_child_node_by_name(contentprotection_node, "pssh");
         if (contentprotection_cenc_pssh_node) {
             text = xmlNodeGetContent(contentprotection_cenc_pssh_node);
-            if (con->scheme_id_uri) {
-                av_freep(&con->scheme_id_uri);
-            }
-            con->scheme_id_uri = av_strdup(scheme_id_uri);
             if (text) {
                 if (con->cenc_pssh) {
                     av_freep(&con->cenc_pssh);
                 }
                 con->cenc_pssh = av_strdup(text);
+                xmlFree(text);
             }
             con->media_type = type;
             av_log(s, AV_LOG_WARNING, "parse manifest contentprotection %s %s %s %s %d",
                 con->scheme_type, con->scheme_id_uri, con->default_kid, con->cenc_pssh, con->media_type);
-            return 0;
+            has_get_valid_contentprotection = 1;
         }
     } else {
         av_log(s, AV_LOG_ERROR, "not support schemeIdUri: '%s'\n", scheme_id_uri);
+    }
+    xmlFree(scheme_id_uri);
+
+    if (has_get_valid_contentprotection) {
+        return 0;
     }
     return AVERROR(EINVAL);
 }
