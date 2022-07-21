@@ -1510,6 +1510,10 @@ static int64_t seek_data(void *opaque, int64_t offset, int whence)
 {
     struct representation *v = opaque;
     if (v->n_fragments && !v->init_sec_data_len) {
+        if (whence & AVSEEK_SIZE) {
+            return (v->input && v->input->seek) ? v->input->seek(v->input->opaque, offset, AVSEEK_SIZE) : AVERROR(ENOSYS);
+        }
+
         return avio_seek(v->input, offset, whence);
     }
 
@@ -1569,9 +1573,11 @@ restart:
     if (ret > 0)
         goto end;
 
-    if (!v->is_restart_needed)
-        v->cur_seq_no++;
-    v->is_restart_needed = 1;
+    if (c->is_live || v->cur_seq_no < v->last_seq_no) {
+        if (!v->is_restart_needed)
+            v->cur_seq_no++;
+        v->is_restart_needed = 1;
+    }
 
 end:
     return ret;
