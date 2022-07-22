@@ -94,6 +94,7 @@ typedef struct MOVFragment {
     unsigned size;
     unsigned flags;
     int64_t time;
+    uint32_t sample_count;
 } MOVFragment;
 
 typedef struct MOVTrackExt {
@@ -146,6 +147,28 @@ typedef struct MOVDrmContext {
     uint8_t default_constant_iv_size;
     uint8_t *default_constant_iv;
 } MOVDrmContext;
+
+typedef struct MOVEncryptionInfo {
+    uint64_t moof_offset;
+    uint32_t sample_count;
+    int64_t *sample_pos;
+
+    // read from senc
+    int use_subsamples;
+    size_t encrypted_sample_count;
+    uint8_t* auxiliary_info;
+    uint8_t* auxiliary_info_end;
+    uint8_t* auxiliary_info_pos;
+    // read from saiz
+    uint8_t auxiliary_info_default_size;
+    uint8_t* auxiliary_info_sizes;
+    size_t auxiliary_info_sizes_count;
+
+    int64_t auxiliary_info_index;
+    int64_t encrypted_sample_start_index;
+
+    struct MOVEncryptionInfo *next;
+} MOVEncryptionInfo;
 
 typedef struct MOVStreamContext {
     AVIOContext *pb;
@@ -224,19 +247,9 @@ typedef struct MOVStreamContext {
 
     int has_sidx;  // If there is an sidx entry for this stream.
     struct {
-        // read from senc
-        int use_subsamples;
-        size_t encrypted_sample_count;
-        uint8_t* auxiliary_info;
-        uint8_t* auxiliary_info_end;
-        uint8_t* auxiliary_info_pos;
-        // read from saiz
-        uint8_t auxiliary_info_default_size;
-        uint8_t* auxiliary_info_sizes;
-        size_t auxiliary_info_sizes_count;
+        MOVEncryptionInfo *enc_list;
+        size_t enc_size;
 
-        int64_t auxiliary_info_index;
-        int64_t encrypted_sample_start_index;
         struct AVAESCTR* aes_ctr;
     } cenc;
 
