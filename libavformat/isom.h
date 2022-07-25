@@ -165,7 +165,6 @@ typedef struct MOVEncryptionInfo {
     size_t auxiliary_info_sizes_count;
 
     int64_t auxiliary_info_index;
-    int64_t encrypted_sample_start_index;
 
     struct MOVEncryptionInfo *next;
 } MOVEncryptionInfo;
@@ -306,6 +305,7 @@ typedef struct MOVContext {
     int decryption_key_len;
     int enable_drefs;
     int32_t movie_display_matrix[3][3]; ///< display matrix from mvhd
+    int is_live;
 } MOVContext;
 
 int ff_mp4_read_descr_len(AVIOContext *pb);

@@ -208,7 +208,7 @@ static MOVEncryptionInfo* check_and_get_encryption_info(MOVContext *c, MOVStream
         sc->cenc.enc_size = 1;
         return sc->cenc.enc_list;
     }
-    if (!sc->has_sidx) {
+    if (c->is_live) {
         return sc->cenc.enc_list;
     }
 
@@ -257,33 +257,38 @@ static MOVEncryptionInfo* default_check_and_get_encryption_info(MOVContext *c)
     return check_and_get_encryption_info(c, sc);
 }
 
-static int64_t find_encryption_info(MOVStreamContext *sc, int64_t pos, MOVEncryptionInfo **out)
+static int64_t find_encryption_info_index(MOVEncryptionInfo *current, int64_t pos)
 {
-    if (!sc->has_sidx) {
+    int max_index = current->sample_count - 1;
+    int min_index = 0;
+    int index;
+    while (max_index > min_index)
+    {
+        index = (max_index + min_index) / 2;
+        if (pos > current->sample_pos[index]) {
+            min_index = index + 1;
+        } else if (pos < current->sample_pos[index]) {
+            max_index = index - 1;
+        } else {
+            return index;
+        }
+    }
+
+    return (max_index == min_index && pos == current->sample_pos[max_index]) ? max_index : -1;
+}
+
+static int64_t find_encryption_info(MOVContext *c, MOVStreamContext *sc, int64_t pos, MOVEncryptionInfo **out)
+{
+    if (c->is_live) {
         *out = sc->cenc.enc_list;
-        return sc->cenc.enc_list->encrypted_sample_start_index;
+        return find_encryption_info_index(*out, pos);
     }
     MOVEncryptionInfo *current = sc->cenc.enc_list;
     while (current)
     {
         if (pos >= current->sample_pos[0] && pos <= current->sample_pos[current->sample_count - 1]) {
             *out = current;
-            int max_index = current->sample_count - 1;
-            int min_index = 0;
-            int index;
-            while (max_index > min_index)
-            {
-                index = (max_index + min_index) / 2;
-                if (pos > current->sample_pos[index]) {
-                    min_index = index + 1;
-                } else if (pos < current->sample_pos[index]) {
-                    max_index = index - 1;
-                } else {
-                    return index;
-                }
-            }
-
-            return (max_index == min_index && pos == current->sample_pos[max_index]) ? max_index : -1;
+            return find_encryption_info_index(*out, pos);
         }
         current = current->next;
     }
@@ -5583,7 +5588,6 @@ static int mov_read_senc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     enc_info->auxiliary_info_end = enc_info->auxiliary_info + auxiliary_info_size;
     enc_info->auxiliary_info_pos = enc_info->auxiliary_info;
     enc_info->auxiliary_info_index = 0;
-    enc_info->encrypted_sample_start_index = sc->current_index;
 
     if (avio_read(pb, enc_info->auxiliary_info, auxiliary_info_size) != auxiliary_info_size) {
         av_log(c->fc, AV_LOG_ERROR, "failed to read the auxiliary info");
@@ -5779,12 +5783,12 @@ static int read_cenc_data(MOVContext *c, MOVStreamContext *sc, int64_t index, AV
 
     MOVEncryptionInfo *enc_info;
 
-    int64_t enc_index = find_encryption_info(sc, pkt->pos, &enc_info);
+    int64_t enc_index = find_encryption_info(c, sc, pkt->pos, &enc_info);
     if (!enc_info || !enc_info->encrypted_sample_count) {
         return 0;
     }
     if (enc_index < 0) {
-        av_log(c->fc, AV_LOG_ERROR, "failed to find the auxiliary info pos %"PRId64"\n", enc_index);
+        av_log(c->fc, AV_LOG_ERROR, "failed to find the auxiliary info for pos %"PRId64"\n", pkt->pos);
         return AVERROR_INVALIDDATA;
     }
 
@@ -5874,7 +5878,7 @@ static int cenc_filter(MOVContext *c, MOVStreamContext *sc, int64_t index, uint8
     int ret;
 
     MOVEncryptionInfo *enc_info;
-    int enc_index = find_encryption_info(sc, pos, &enc_info);
+    int enc_index = find_encryption_info(c, sc, pos, &enc_info);
     if (!enc_info) {
         return 0;
     }
@@ -6719,6 +6723,7 @@ static int mov_read_header(AVFormatContext *s)
 
     mov->fc = s;
     mov->trak_index = -1;
+    mov->is_live = pb->seek ? 0 : 1;
     /* .mov and .mp4 aren't streamable anyway (only progressive download if moov is before mdat) */
     if (pb->seekable & AVIO_SEEKABLE_NORMAL)
         atom.size = avio_size(pb);
