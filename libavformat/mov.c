@@ -182,9 +182,17 @@ static MOVEncryptionInfo* new_encryption_info(MOVContext *c)
 {
     MOVFragment *frag = &c->fragment;
     MOVEncryptionInfo *enc_info = av_mallocz(sizeof(MOVEncryptionInfo));
+    if (!enc_info) {
+        av_log(c->fc, AV_LOG_ERROR, "fail to create MOVEncryptionInfo!\n");
+        return NULL;
+    }
     enc_info->moof_offset = frag->moof_offset;
     enc_info->sample_count = frag->sample_count;
     enc_info->sample_pos = av_mallocz_array(enc_info->sample_count, sizeof(*enc_info->sample_pos));
+    if (!enc_info->sample_pos) {
+        av_log(c->fc, AV_LOG_ERROR, "fail to create MOVEncryptionInfo's sample_pos!\n");
+        return NULL;
+    }
     enc_info->next = NULL;
     av_log(c->fc, AV_LOG_DEBUG, "new_encryption_info moof_offset:%"PRId64", sample_count:%d\n",
         enc_info->moof_offset, enc_info->sample_count);
@@ -205,6 +213,9 @@ static MOVEncryptionInfo* check_and_get_encryption_info(MOVContext *c, MOVStream
 
     if (!sc->cenc.enc_list) {
         sc->cenc.enc_list = new_encryption_info(c);
+        if (!sc->cenc.enc_list) {
+            return NULL;
+        }
         sc->cenc.enc_size = 1;
         return sc->cenc.enc_list;
     }
@@ -213,8 +224,8 @@ static MOVEncryptionInfo* check_and_get_encryption_info(MOVContext *c, MOVStream
     }
 
     MOVEncryptionInfo *current = sc->cenc.enc_list;
-    MOVEncryptionInfo *next;
-    MOVEncryptionInfo *target;
+    MOVEncryptionInfo *next = NULL;
+    MOVEncryptionInfo *target = NULL;
     do
     {
         if (frag->moof_offset == current->moof_offset) {
@@ -224,6 +235,9 @@ static MOVEncryptionInfo* check_and_get_encryption_info(MOVContext *c, MOVStream
             next = current->next;
             if (next && frag->moof_offset < next->moof_offset) {
                 target = new_encryption_info(c);
+                if (!target) {
+                    break;
+                }
                 current->next = target;
                 target->next = next;
                 sc->cenc.enc_size++;
@@ -232,6 +246,9 @@ static MOVEncryptionInfo* check_and_get_encryption_info(MOVContext *c, MOVStream
         }
         if (!current->next) {
             target = new_encryption_info(c);
+            if (!target) {
+                break;
+            }
             current->next = target;
             sc->cenc.enc_size++;
             break;
@@ -5483,13 +5500,21 @@ static int mov_read_pssh(MOVContext *c, AVIOContext *pb, MOVAtom atom)
 
     uint32_t pssh_data_size = avio_rb32(pb);
     uint8_t *pssh_data = av_mallocz(pssh_data_size);
+    if (!pssh_data)
+        return AVERROR(ENOMEM);
     ret = ffio_read_size(pb, pssh_data, pssh_data_size);
     if (ret < 0)
         return ret;
 
-    sc->drm_context->pssh_data_size = AV_BASE64_SIZE(pssh_data_size);
-    sc->drm_context->pssh_data = av_mallocz(sc->drm_context->pssh_data_size + 1);
-    sc->drm_context->pssh_data[sc->drm_context->pssh_data_size] = 0;
+    uint32_t base64_size = AV_BASE64_SIZE(pssh_data_size);
+    if (sc->drm_context->pssh_data_size != base64_size) {
+        av_freep(&sc->drm_context->pssh_data);
+        sc->drm_context->pssh_data = av_mallocz(base64_size + 1);
+        if (!sc->drm_context->pssh_data)
+            return AVERROR(ENOMEM);
+        sc->drm_context->pssh_data_size = base64_size;
+        sc->drm_context->pssh_data[sc->drm_context->pssh_data_size] = 0;
+    }
 
     if (!av_base64_encode(sc->drm_context->pssh_data, sc->drm_context->pssh_data_size, pssh_data, pssh_data_size))
         return AVERROR(ENOMEM);
@@ -5538,8 +5563,14 @@ static int mov_read_tenc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         return ret;
 
     if (sc->drm_context->default_is_encrypted && sc->drm_context->default_iv_size == 0) {
-        sc->drm_context->default_constant_iv_size = avio_r8(pb);
-        sc->drm_context->default_constant_iv = av_mallocz(sc->drm_context->default_constant_iv_size);
+        uint8_t constant_iv_size = avio_r8(pb);
+        if (constant_iv_size != sc->drm_context->default_constant_iv_size) {
+            av_freep(&sc->drm_context->default_constant_iv);
+            sc->drm_context->default_constant_iv = av_mallocz(constant_iv_size);
+            if (!sc->drm_context->default_constant_iv)
+                return AVERROR(ENOMEM);
+            sc->drm_context->default_constant_iv_size = constant_iv_size;
+        }
         ret = ffio_read_size(pb, sc->drm_context->default_constant_iv, sc->drm_context->default_constant_iv_size);
         if (ret < 0)
             return ret;
@@ -5566,6 +5597,10 @@ static int mov_read_senc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         return 0;
 
     MOVEncryptionInfo* enc_info = check_and_get_encryption_info(c, sc);
+    if (!enc_info) {
+        av_log(c->fc, AV_LOG_ERROR, "%s can not create encrytption info\n", __func__);
+        return AVERROR(ENOMEM);
+    }
 
     avio_r8(pb); /* version */
     enc_info->use_subsamples = avio_rb24(pb) & 0x02; /* flags */
@@ -5580,6 +5615,9 @@ static int mov_read_senc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     /* save the auxiliary info as is */
     auxiliary_info_size = atom.size - 8;
 
+    if (enc_info->auxiliary_info) {
+        av_freep(&enc_info->auxiliary_info);
+    }
     enc_info->auxiliary_info = av_malloc(auxiliary_info_size);
     if (!enc_info->auxiliary_info) {
         return AVERROR(ENOMEM);
@@ -5626,6 +5664,10 @@ static int mov_read_saiz(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         return 0;
 
     MOVEncryptionInfo* enc_info = check_and_get_encryption_info(c, sc);
+    if (!enc_info) {
+        av_log(c->fc, AV_LOG_ERROR, "%s can not create encrytption info\n", __func__);
+        return AVERROR(ENOMEM);
+    }
 
     atom_header_size = 9;
 
@@ -5654,7 +5696,10 @@ static int mov_read_saiz(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     /* save the auxiliary info sizes as is */
     data_size = atom.size - atom_header_size;
 
-    enc_info->auxiliary_info_sizes = av_malloc(data_size);
+    if (enc_info->auxiliary_info_sizes_count != data_size) {
+        av_freep(&enc_info->auxiliary_info_sizes);
+        enc_info->auxiliary_info_sizes = av_malloc(data_size);
+    }
     if (!enc_info->auxiliary_info_sizes) {
         return AVERROR(ENOMEM);
     }
