@@ -5781,7 +5781,7 @@ static int mov_seek_auxiliary_info(MOVContext *c, MOVEncryptionInfo *enc_info, i
     return 0;
 }
 
-static int read_drm_init_info(MOVContext *c, MOVStreamContext *sc, int64_t index, AVPacket *pkt)
+static int read_drm_init_info(MOVContext *c, MOVStreamContext *sc, int64_t index, AVPacket *pkt, enum AVMediaType media_type)
 {
     uint8_t *side;
     char scheme_type[5];
@@ -5801,10 +5801,12 @@ static int read_drm_init_info(MOVContext *c, MOVStreamContext *sc, int64_t index
         sprintf(scheme_type, "%s", "cenc");
     }
 
-    if (sc->width && sc->height) {
+    if (media_type == AVMEDIA_TYPE_VIDEO) {
         sprintf(drm_init_info, "video,%s,%s,%s\0", scheme_type, sc->drm_context->uuid, sc->drm_context->pssh_data);
-    } else {
+    } else if (media_type == AVMEDIA_TYPE_AUDIO) {
         sprintf(drm_init_info, "audio,%s,%s,%s\0", scheme_type, sc->drm_context->uuid, sc->drm_context->pssh_data);
+    } else {
+        sprintf(drm_init_info, "unknown,%s,%s,%s\0", scheme_type, sc->drm_context->uuid, sc->drm_context->pssh_data);
     }
 
     total_size = strlen(drm_init_info) + 1;
@@ -7220,7 +7222,7 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
     if (sc->drm_context) {
         if (sc->drm_context->has_new_pssh_updated) {
             sc->drm_context->has_new_pssh_updated = 0;
-            ret = read_drm_init_info(mov, sc, current_index, pkt);
+            ret = read_drm_init_info(mov, sc, current_index, pkt, st->codecpar->codec_type);
             if (ret) {
                 return ret;
             }
