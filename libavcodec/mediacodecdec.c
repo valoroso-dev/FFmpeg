@@ -34,6 +34,7 @@
 #include "h264_parse.h"
 #include "hevc_parse.h"
 #include "internal.h"
+#include "mediacodec.h"
 #include "mediacodec_wrapper.h"
 #include "mediacodecdec_common.h"
 
@@ -499,8 +500,13 @@ static int mediacodec_decode_frame(AVCodecContext *avctx, void *data,
         }
     }
 
+    AVMediaCodecContext *user_ctx = avctx->hwaccel_context;
     /* process buffered data */
     while (!*got_frame) {
+        if (user_ctx && user_ctx->abort_request) {
+            av_log(avctx, AV_LOG_INFO, "%s: user request abort\n", __func__);
+            break;
+        }
         /* prepare the input data */
         if (s->buffered_pkt.size <= 0) {
             av_packet_unref(&s->buffered_pkt);

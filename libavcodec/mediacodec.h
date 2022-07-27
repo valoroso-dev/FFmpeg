@@ -40,6 +40,10 @@ typedef struct AVMediaCodecContext {
      * android/media/MediaCrypto object reference.
      */
     void *crypto;
+    /**
+     * request to stop decoding
+     */
+    int abort_request;
 
 } AVMediaCodecContext;
 
