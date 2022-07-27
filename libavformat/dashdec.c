@@ -1510,9 +1510,9 @@ static int64_t seek_data(void *opaque, int64_t offset, int whence)
 {
     struct representation *v = opaque;
     if (v->n_fragments && !v->init_sec_data_len) {
-        // if (whence & AVSEEK_SIZE) {
-        //     return (v->input && v->input->seek) ? v->input->seek(v->input->opaque, offset, AVSEEK_SIZE) : AVERROR(ENOSYS);
-        // }
+        if (whence & AVSEEK_SIZE) {
+            return (v->input && v->input->seek) ? v->input->seek(v->input->opaque, offset, AVSEEK_SIZE) : AVERROR(ENOSYS);
+        }
 
         return avio_seek(v->input, offset, whence);
     }
@@ -1644,10 +1644,11 @@ static int reopen_demux_for_component(AVFormatContext *s, struct representation 
     }
     if (c->is_live) {
         ffio_init_context(&pls->pb, avio_ctx_buffer , INITIAL_BUFFER_SIZE, 0, pls, read_data, NULL, NULL);
+        pls->pb.seekable = 0;
     } else {
         ffio_init_context(&pls->pb, avio_ctx_buffer , INITIAL_BUFFER_SIZE, 0, pls, read_data, NULL, seek_data);
+        pls->pb.seekable = AVIO_SEEKABLE_NORMAL;
     }
-    pls->pb.seekable = 0;
 
     if ((ret = ff_copy_whiteblacklists(pls->ctx, s)) < 0)
         goto fail;
