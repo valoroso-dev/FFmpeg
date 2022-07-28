@@ -1555,6 +1555,13 @@ int ff_AMediaCodec_queueSecureInputBuffer(FFAMediaCodec* codec, size_t idx, off_
     jobject crypto_info = NULL;
     jobject crypto_pattern= NULL;
 
+    jintArray numBytesOfClearData = NULL;
+    jintArray numBytesOfEncryptedData = NULL;
+    jbyteArray iv = NULL;
+    jbyteArray key = NULL;
+    jstring cryptoInfoString = NULL;
+    const char* c_str;
+
     JNI_GET_ENV_OR_RETURN(env, codec, AVERROR_EXTERNAL);
 
     crypto_info = (*env)->NewObject(env, codec->jfields.cryptoinfo_class, codec->jfields.constructor_CryptoInfo);
@@ -1563,13 +1570,13 @@ int ff_AMediaCodec_queueSecureInputBuffer(FFAMediaCodec* codec, size_t idx, off_
         goto fail;
     }
 
-    jintArray numBytesOfClearData = (*env)->NewIntArray(env, info->numSubSamples);
+    numBytesOfClearData = (*env)->NewIntArray(env, info->numSubSamples);
     (*env)->SetIntArrayRegion(env, numBytesOfClearData, 0, info->numSubSamples, info->numBytesOfClearData);
-    jintArray numBytesOfEncryptedData = (*env)->NewIntArray(env, info->numSubSamples);
+    numBytesOfEncryptedData = (*env)->NewIntArray(env, info->numSubSamples);
     (*env)->SetIntArrayRegion(env, numBytesOfEncryptedData, 0, info->numSubSamples, info->numBytesOfEncryptedData);
-    jbyteArray iv = (*env)->NewByteArray(env, info->ivLength);
+    iv = (*env)->NewByteArray(env, info->ivLength);
     (*env)->SetByteArrayRegion(env, iv, 0, info->ivLength, info->iv);
-    jbyteArray key = (*env)->NewByteArray(env, info->keyLength);
+    key = (*env)->NewByteArray(env, info->keyLength);
     (*env)->SetByteArrayRegion(env, key, 0, info->keyLength, info->key);
     (*env)->CallVoidMethod(env, crypto_info, codec->jfields.method_CryptoInfo_set, info->numSubSamples, numBytesOfClearData, numBytesOfEncryptedData, key, iv, info->mode);
 
@@ -1584,8 +1591,8 @@ int ff_AMediaCodec_queueSecureInputBuffer(FFAMediaCodec* codec, size_t idx, off_
     }
 
     if (av_log_get_level() <= AV_LOG_DEBUG) {
-        jstring cryptoInfoString = (*env)->CallObjectMethod(env, crypto_info, codec->jfields.method_CryptoInfo_toString);
-        const char* c_str = (*env)->GetStringUTFChars(env, cryptoInfoString, NULL);
+        cryptoInfoString = (*env)->CallObjectMethod(env, crypto_info, codec->jfields.method_CryptoInfo_toString);
+        c_str = (*env)->GetStringUTFChars(env, cryptoInfoString, NULL);
         av_log(NULL, AV_LOG_DEBUG, "ff_AMediaCodec_queueSecureInputBuffer cryptoInfoString: '%s'", c_str);
         (*env)->ReleaseStringUTFChars(env, cryptoInfoString, c_str);
         (*env)->DeleteLocalRef(env, cryptoInfoString);
@@ -1864,6 +1871,7 @@ int ff_AMediaCodec_CryptoInfo_delete(FFAMediaCodecCryptoInfo *crypto_info)
 int ff_AMediaCodec_CryptoInfo_fill(uint8_t *key_data, uint32_t key_data_size, FFAMediaCodecCryptoInfo **crypto_info, uint32_t av_data_len)
 {
     FFAMediaCodecCryptoInfo *out = *crypto_info;
+    uint32_t subsample_count;
     uint8_t iv_size = key_data[0] & 0x7F;
     uint8_t is_encrypted = key_data[0] & 0x80;
     uint8_t scheme_type= key_data[1];
@@ -1871,12 +1879,12 @@ int ff_AMediaCodec_CryptoInfo_fill(uint8_t *key_data, uint32_t key_data_size, FF
     uint8_t default_skip_byte_block = key_data[3];
     key_data += 4;
 
-    if (scheme_type == 1 || scheme_type == 3) {
-        out->mode = 1;
-    } else if (scheme_type == 2 || scheme_type == 4) {
-        out->mode = 2;
+    if (scheme_type == 1/*cenc*/ || scheme_type == 3/*cens*/) {
+        out->mode = 1;//MediaCodec#CryptoInfo#CRYPTO_MODE_AES_CTR
+    } else if (scheme_type == 2/*cbc1*/ || scheme_type == 4/*cbcs*/) {
+        out->mode = 2;//MediaCodec#CryptoInfo#CRYPTO_MODE_AES_CBC
     } else {
-        out->mode = 0;
+        out->mode = 0;//MediaCodec#CryptoInfo#CRYPTO_MODE_UNENCRYPTED
     }
     out->encryptBlocks = default_crypto_byte_block;
     out->skipBlocks = default_skip_byte_block;
@@ -1885,7 +1893,6 @@ int ff_AMediaCodec_CryptoInfo_fill(uint8_t *key_data, uint32_t key_data_size, FF
     memcpy(out->iv, key_data, iv_size);
     key_data += iv_size;
 
-    uint32_t subsample_count;
     subsample_count = key_data[0] * 256 + key_data[1];
     key_data += 2;
 

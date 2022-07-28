@@ -86,7 +86,7 @@ struct FFAMediaCodecCryptoInfo {
     int32_t keyLength;
     int32_t mode;
     int32_t *numBytesOfClearData;
-    int64_t *numBytesOfEncryptedData;
+    int32_t *numBytesOfEncryptedData;
     uint32_t numSubSamples;
     uint8_t encryptBlocks;
     uint8_t skipBlocks;
@@ -138,7 +138,7 @@ int ff_AMediaCodec_getConfigureFlagEncode(FFAMediaCodec *codec);
 
 int ff_AMediaCodec_cleanOutputBuffers(FFAMediaCodec *codec);
 
-FFAMediaCodecCryptoInfo* ff_AMediaCodec_CryptoInfo_new();
+FFAMediaCodecCryptoInfo* ff_AMediaCodec_CryptoInfo_new(void);
 int ff_AMediaCodec_CryptoInfo_delete(FFAMediaCodecCryptoInfo *crypto_info);
 int ff_AMediaCodec_CryptoInfo_fill(uint8_t *key_data, uint32_t key_data_size, FFAMediaCodecCryptoInfo **crypto_info, uint32_t av_data_len);
 

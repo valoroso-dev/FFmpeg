@@ -454,6 +454,7 @@ static int mediacodec_decode_frame(AVCodecContext *avctx, void *data,
                                    int *got_frame, AVPacket *avpkt)
 {
     MediaCodecH264DecContext *s = avctx->priv_data;
+    AVMediaCodecContext *user_ctx = avctx->hwaccel_context;
     AVFrame *frame    = data;
     int ret;
 
@@ -500,7 +501,6 @@ static int mediacodec_decode_frame(AVCodecContext *avctx, void *data,
         }
     }
 
-    AVMediaCodecContext *user_ctx = avctx->hwaccel_context;
     /* process buffered data */
     while (!*got_frame) {
         if (user_ctx && user_ctx->abort_request) {

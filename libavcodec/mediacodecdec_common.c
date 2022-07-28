@@ -364,9 +364,6 @@ done:
 }
 
 static int mediacodec_dec_parse_audio_format(AVCodecContext *avctx, MediaCodecDecContext *s) {
-    int sample_rate = 0;
-    int channel_count = 0;
-    int pcm_encoding = 0;
     int32_t value = 0;
     char *format = NULL;
 
@@ -543,6 +540,7 @@ int ff_mediacodec_dec_init(AVCodecContext *avctx, MediaCodecDecContext *s,
     int ret = 0;
     int status;
     int profile;
+    AVMediaCodecContext *user_ctx = avctx->hwaccel_context;
 
     enum AVPixelFormat pix_fmt;
     static const enum AVPixelFormat pix_fmts[] = {
@@ -552,7 +550,6 @@ int ff_mediacodec_dec_init(AVCodecContext *avctx, MediaCodecDecContext *s,
 
     atomic_init(&s->refcount, 1);
 
-    AVMediaCodecContext *user_ctx = avctx->hwaccel_context;
     pix_fmt = ff_get_format(avctx, pix_fmts);
     if (pix_fmt == AV_PIX_FMT_MEDIACODEC) {
         if (user_ctx && user_ctx->surface) {
@@ -639,6 +636,9 @@ int ff_mediacodec_dec_decode(AVCodecContext *avctx, MediaCodecDecContext *s,
     size_t size;
     FFAMediaCodec *codec = s->codec;
     FFAMediaCodecBufferInfo info = { 0 };
+    FFAMediaCodecCryptoInfo *crypto_info;
+    uint8_t *crypto_key_data = NULL;
+    int crypto_key_data_size = 0;
 
     int status;
 
@@ -715,11 +715,9 @@ int ff_mediacodec_dec_decode(AVCodecContext *avctx, MediaCodecDecContext *s,
                     av_log(avctx, AV_LOG_ERROR, "crypto info is invalid\n");
                     return AVERROR_EXTERNAL;
                 }
-                FFAMediaCodecCryptoInfo *crypto_info = s->crypto_info;
-                uint8_t  *key_data      = NULL;
-                int       key_data_size = 0;
-                key_data = av_packet_get_side_data(pkt, AV_PKT_DATA_DRM_KEY, &key_data_size);
-                ff_AMediaCodec_CryptoInfo_fill(key_data, key_data_size, &crypto_info, size);
+                crypto_info     = s->crypto_info;
+                crypto_key_data = av_packet_get_side_data(pkt, AV_PKT_DATA_DRM_KEY, &crypto_key_data_size);
+                ff_AMediaCodec_CryptoInfo_fill(crypto_key_data, crypto_key_data_size, &crypto_info, size);
                 status = ff_AMediaCodec_queueSecureInputBuffer(codec, index, 0, crypto_info, pts, 0);
             } else {
                 status = ff_AMediaCodec_queueInputBuffer(codec, index, 0, size, pts, 0);
