@@ -328,7 +328,7 @@ static int free_encryption_info_list(MOVStreamContext *sc)
         sc->cenc.enc_size--;
         current = next;
     }
-    av_log(NULL, AV_LOG_DEBUG, "free_encryption_info_list enc_size=%d\n", sc->cenc.enc_size);
+    av_log(NULL, AV_LOG_DEBUG, "free_encryption_info_list enc_size=%zu\n", sc->cenc.enc_size);
     return 0;
 }
 
@@ -5659,7 +5659,7 @@ static int mov_read_senc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     }
 
     if (sc->drm_context) {
-        av_log(c->fc, AV_LOG_INFO, "drm cenc: is_sample_encrypted:%d, sample_encrypted_count=%d, sample_key_size=%d, auxiliary_info_size=%d\n",
+        av_log(c->fc, AV_LOG_INFO, "drm cenc: is_sample_encrypted:%d, sample_encrypted_count=%zu, sample_key_size=%d, auxiliary_info_size=%zu\n",
                 enc_info->use_subsamples, enc_info->encrypted_sample_count, enc_info->auxiliary_info_default_size, auxiliary_info_size);
         return 0;
     }
@@ -7283,6 +7283,12 @@ static int mov_seek_fragment(AVFormatContext *s, AVStream *st, int64_t timestamp
                 if (index->items[j].time <= timestamp) {
                     if (index->items[j].headers_read)
                         return 0;
+
+                    if (s->pb->error == AVERROR_EOF) {
+                        s->pb->error = 0;
+                        s->pb->eof_reached = 0;
+                        av_log(s, AV_LOG_INFO, "clear eof flag after seeking\n");
+                    }
 
                     return mov_switch_root(s, index->items[j].moof_offset);
                 }
