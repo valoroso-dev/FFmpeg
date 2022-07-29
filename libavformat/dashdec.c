@@ -346,7 +346,7 @@ static struct contentprotection* new_contentprotection(void)
 {
     struct contentprotection *out;
     out = av_mallocz(sizeof(struct contentprotection));
-    out->scheme_type = av_strdup("unknown");
+    out->scheme_type = av_strdup("cenc");//If there is no scheme information, assume patternless AES-CTR.
     out->scheme_id_uri = av_strdup("unknown");
     out->default_kid = av_strdup("unknown");
     out->cenc_pssh = av_strdup("unknown");

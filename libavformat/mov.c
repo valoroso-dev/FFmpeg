@@ -5434,6 +5434,9 @@ static int mov_read_schm(MOVContext *c, AVIOContext *pb, MOVAtom atom)
 
     avio_r8(pb); /* version */
     has_scheme_uri = avio_rb24(pb) & 0x01; /* flags */
+    if (atom.size - 20 <= 0) {
+        has_scheme_uri = 0;
+    }
 
     scheme_type = avio_rl32(pb);
     if (scheme_type == MKTAG('c','e','n','c')) {
@@ -5457,12 +5460,11 @@ static int mov_read_schm(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         ret = ffio_read_size(pb, sc->drm_context->scheme_uri, uri_len);
         if (ret < 0) {
             av_freep(&sc->drm_context->scheme_uri);
-            return ret;
+            // return ret;
         }
     }
 
-    av_log(c->fc, AV_LOG_INFO, "mov_read_schm scheme_type=%d,scheme_version=%d,scheme_uri=%s", sc->drm_context->scheme_type,
-            sc->drm_context->scheme_version, sc->drm_context->scheme_uri);
+    av_log(c->fc, AV_LOG_INFO, "mov_read_schm scheme_type=%d,scheme_version=%d", sc->drm_context->scheme_type, sc->drm_context->scheme_version);
     return 0;
 }
 
@@ -5601,8 +5603,8 @@ static int mov_read_tenc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
             return ret;
     }
 
-    av_log(c->fc, AV_LOG_INFO, "mov_read_tenc is_encrypted=%d,pattern=%d,kid=%s,constant_iv=%s", sc->drm_context->default_is_encrypted,
-            pattern, sc->drm_context->default_kid, sc->drm_context->default_constant_iv);
+    // av_log(c->fc, AV_LOG_INFO, "mov_read_tenc is_encrypted=%d,pattern=%d,kid=%s,constant_iv=%s", sc->drm_context->default_is_encrypted,
+    //         pattern, sc->drm_context->default_kid, sc->drm_context->default_constant_iv);
     return 0;
 }
 
@@ -5824,7 +5826,7 @@ static int read_drm_init_info(MOVContext *c, MOVStreamContext *sc, int64_t index
     } else if (sc->drm_context->scheme_type == 4) {
         sprintf(scheme_type, "%s", "cbcs");
     } else {
-        sprintf(scheme_type, "%s", "unkw");
+        sprintf(scheme_type, "%s", "cenc");
     }
 
     if (media_type == AVMEDIA_TYPE_VIDEO) {
