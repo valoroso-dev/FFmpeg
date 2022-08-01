@@ -156,6 +156,8 @@ struct playlist {
      * playlist, if any. */
     int n_init_sections;
     struct segment **init_sections;
+
+    char *drm_info;
 };
 
 /*
@@ -263,6 +265,7 @@ static void free_playlist_list(HLSContext *c)
             pls->ctx->pb = NULL;
             avformat_close_input(&pls->ctx);
         }
+        av_freep(&pls->drm_info);
         av_free(pls);
     }
     av_freep(&c->playlists);
@@ -375,8 +378,9 @@ static void handle_variant_args(struct variant_info *info, const char *key,
 
 struct key_info {
      char uri[MAX_URL_SIZE];
-     char method[11];
+     char method[16];
      char iv[35];
+     char format[64];
 };
 
 static void handle_key_args(struct key_info *info, const char *key,
@@ -391,6 +395,9 @@ static void handle_key_args(struct key_info *info, const char *key,
     } else if (!strncmp(key, "IV=", key_len)) {
         *dest     =        info->iv;
         *dest_len = sizeof(info->iv);
+    } else if (!strncmp(key, "KEYFORMAT=", key_len)) {
+        *dest     =        info->format;
+        *dest_len = sizeof(info->format);
     }
 }
 
@@ -737,6 +744,7 @@ static int parse_playlist(HLSContext *c, const char *url,
                                &variant_info);
         } else if (av_strstart(line, "#EXT-X-KEY:", &ptr)) {
             struct key_info info = {{0}};
+            char pls_drm_info[MAX_URL_SIZE];
             ff_parse_key_value(ptr, (ff_parse_key_val_cb) handle_key_args,
                                &info);
             key_type = KEY_NONE;
@@ -750,6 +758,20 @@ static int parse_playlist(HLSContext *c, const char *url,
                 has_iv = 1;
             }
             av_strlcpy(key, info.uri, sizeof(key));
+
+            if (!strcmp(info.format, "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed")) {
+                key_type = KEY_NONE;
+                has_iv = 0;
+                if (!pls->drm_info) {
+                    sprintf(pls_drm_info, "%s,%s,%s", ((!strcmp(info.method, "SAMPLE-AES-CTR") || !strcmp(info.method, "SAMPLE-AES-CENC")) ? "cenc" : "cbcs"),
+                                                      info.format,
+                                                      (strstr(info.uri, "data:text/plain;base64,") ? info.uri + 23 : "unknown"));
+                    pls->drm_info = av_strdup(pls_drm_info);
+                }
+            } else if (pls->drm_info) {
+                key_type = KEY_NONE;
+                has_iv = 0;
+            }
         } else if (av_strstart(line, "#EXT-X-MEDIA:", &ptr)) {
             struct rendition_info info = {{0}};
             ff_parse_key_value(ptr, (ff_parse_key_val_cb) handle_rendition_args,
@@ -1664,6 +1686,7 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
     HLSContext *c = s->priv_data;
     int ret = 0, i;
     int highest_cur_seq_no = 0;
+    char **drm_holder = s->opaque;
 
     c->ctx                = s;
     c->interrupt_callback = &s->interrupt_callback;
@@ -1857,6 +1880,25 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
         add_metadata_from_renditions(s, pls, AVMEDIA_TYPE_AUDIO);
         add_metadata_from_renditions(s, pls, AVMEDIA_TYPE_VIDEO);
         add_metadata_from_renditions(s, pls, AVMEDIA_TYPE_SUBTITLE);
+
+        if (drm_holder && (*drm_holder) && pls->drm_info && pls->n_main_streams > 0) {
+            char *drm_info = *drm_holder;
+            char media_type[8];
+            AVStream *st = pls->main_streams[0];
+            if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+                sprintf(media_type, "%s", "audio");
+            } else if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+                sprintf(media_type, "%s", "video");
+            } else {
+                sprintf(media_type, "%s", "unknown");
+            }
+            if (strlen(drm_info) > 0) {
+                sprintf(drm_info, "%s;%s,%s", drm_info, media_type, pls->drm_info);
+            } else {
+                sprintf(drm_info, "%s,%s", media_type, pls->drm_info);
+            }
+            av_log(s, AV_LOG_WARNING, "read hls drm info: '%s'", (*drm_holder));
+        }
     }
 
     update_noheader_flag(s);
