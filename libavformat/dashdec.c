@@ -113,6 +113,8 @@ struct representation {
     uint32_t init_sec_buf_read_offset;
     int64_t cur_timestamp;
     int is_restart_needed;
+
+    char* drm_info;
 };
 
 struct contentprotection {
@@ -339,6 +341,7 @@ static void free_representation(struct representation *pls)
     }
 
     av_freep(&pls->url_template);
+    av_freep(&pls->drm_info);
     av_freep(pls);
 }
 
@@ -766,6 +769,7 @@ static int parse_manifest_representation(AVFormatContext *s, const char *url,
             ret = AVERROR(ENOMEM);
             goto end;
         }
+        rep->parent = s;
         representation_segmenttemplate_node = find_child_node_by_name(representation_node, "SegmentTemplate");
         representation_baseurl_node = find_child_node_by_name(representation_node, "BaseURL");
         representation_segmentlist_node = find_child_node_by_name(representation_node, "SegmentList");
@@ -1252,7 +1256,6 @@ static void move_segments(struct representation *rep_src, struct representation 
 
 static int refresh_manifest(AVFormatContext *s)
 {
-
     int ret = 0;
     DASHContext *c = s->priv_data;
 
@@ -1634,6 +1637,9 @@ static int reopen_demux_for_component(AVFormatContext *s, struct representation 
         ret = AVERROR(ENOMEM);
         goto fail;
     }
+    if (pls->drm_info) {
+        pls->ctx->opaque = &pls->drm_info;
+    }
 
     avio_ctx_buffer  = av_malloc(INITIAL_BUFFER_SIZE);
     if (!avio_ctx_buffer ) {
@@ -1742,6 +1748,9 @@ static int dash_read_header(AVFormatContext *s)
 
     /* Open the demuxer for curent video and current audio components if available */
     if (!ret && c->cur_video) {
+        if (drm_holder && (*drm_holder) && !c->cur_video->drm_info) {
+            c->cur_video->drm_info = av_mallocz(1024);
+        }
         ret = open_demux_for_component(s, c->cur_video);
         if (!ret) {
             c->cur_video->stream_index = stream_index;
@@ -1753,6 +1762,9 @@ static int dash_read_header(AVFormatContext *s)
     }
 
     if (!ret && c->cur_audio) {
+        if (drm_holder && (*drm_holder) && !c->cur_audio->drm_info) {
+            c->cur_audio->drm_info = av_mallocz(1024);
+        }
         ret = open_demux_for_component(s, c->cur_audio);
         if (!ret) {
             c->cur_audio->stream_index = stream_index;
@@ -1788,11 +1800,23 @@ static int dash_read_header(AVFormatContext *s)
         char *drm_info = *drm_holder;
         if (c->cp_audio && c->cp_video) {
             sprintf(drm_info, "audio,%s,%s,%s;video,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh,
-                                                                 c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
+                                                               c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
         } else if (c->cp_audio) {
             sprintf(drm_info, "audio,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
         } else if (c->cp_video) {
             sprintf(drm_info, "video,%s,%s,%s", c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
+        } else if (c->cur_audio && c->cur_audio->drm_info && c->cur_video && c->cur_video->drm_info) {
+            sprintf(drm_info, "%s;%s", c->cur_audio->drm_info, c->cur_video->drm_info);
+        } else if (c->cur_audio && c->cur_audio->drm_info) {
+            sprintf(drm_info, "%s", c->cur_audio->drm_info);
+        } else if (c->cur_video && c->cur_video->drm_info) {
+            sprintf(drm_info, "%s", c->cur_video->drm_info);
+        }
+        if (c->cur_audio && c->cur_audio->drm_info) {
+            av_freep(&c->cur_audio->drm_info);
+        }
+        if (c->cur_video && c->cur_video->drm_info) {
+            av_freep(&c->cur_video->drm_info);
         }
         av_log(s, AV_LOG_WARNING, "read contentprotection %s", drm_info);
     }

@@ -5498,6 +5498,9 @@ static int mov_read_pssh(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     leastSigBits = avio_rb64(pb);
     if (mostSigBits == 0xEDEF8BA979D64ACEL && leastSigBits == 0xA3C827DCD51D21EDL) {
         // widevine
+        if (sc->drm_context->uuid) {
+            av_freep(&sc->drm_context->uuid);
+        }
         sc->drm_context->uuid = av_strdup("urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed");
     } else if (mostSigBits == 0x9A04F07998404286L && leastSigBits == 0xAB92E65BE0885F95L) {
         // playready
@@ -5810,9 +5813,8 @@ static int mov_seek_auxiliary_info(MOVContext *c, MOVEncryptionInfo *enc_info, i
     return 0;
 }
 
-static int read_drm_init_info(MOVContext *c, MOVStreamContext *sc, int64_t index, AVPacket *pkt, enum AVMediaType media_type)
+static int fill_drm_init_info(MOVStreamContext *sc, enum AVMediaType media_type, char** out)
 {
-    uint8_t *side;
     char scheme_type[5];
     char drm_init_info[1024];
     uint32_t total_size;
@@ -5838,15 +5840,23 @@ static int read_drm_init_info(MOVContext *c, MOVStreamContext *sc, int64_t index
     }
 
     total_size = strlen(drm_init_info) + 1;
+    memcpy((*out), drm_init_info, total_size);
+    return total_size;
+}
+
+static int read_drm_init_info(MOVContext *c, MOVStreamContext *sc, int64_t index, AVPacket *pkt, enum AVMediaType media_type)
+{
+    uint8_t *side;
+    uint32_t total_size = 64 + sc->drm_context->pssh_data_size;
     side = av_packet_new_side_data(pkt,
                                    AV_PKT_DATA_DRM_INIT_INFO,
                                    total_size);
     if (!side)
         return AVERROR(ENOMEM);
 
-    memcpy(side, drm_init_info, total_size);
+    fill_drm_init_info(sc, media_type, &side);
     pkt->flags |= AV_PKT_FLAG_DRM_INIT_INFO;
-    av_log(c->fc, AV_LOG_INFO, "read_drm_init_info index=%"PRId64" drm_init_info=%s\n", index, drm_init_info);
+    av_log(c->fc, AV_LOG_INFO, "read_drm_init_info index=%"PRId64" drm_init_info=%s\n", index, side);
 
     return 0;
 }
@@ -6785,6 +6795,7 @@ static int mov_read_header(AVFormatContext *s)
 {
     MOVContext *mov = s->priv_data;
     AVIOContext *pb = s->pb;
+    char **drm_holder = s->opaque;
     int j, err;
     MOVAtom atom = { AV_RL32("root") };
     int i;
@@ -6820,6 +6831,32 @@ static int mov_read_header(AVFormatContext *s)
         return AVERROR_INVALIDDATA;
     }
     av_log(mov->fc, AV_LOG_TRACE, "on_parse_exit_offset=%"PRId64"\n", avio_tell(pb));
+
+    if (drm_holder && (*drm_holder)) {
+        char* drm_info = *drm_holder;
+        uint32_t audio_drm_info_size = 0;
+        uint32_t video_drm_info_size = 0;
+        for (i = 0; i < s->nb_streams; i++) {
+            AVStream *st = s->streams[i];
+            MOVStreamContext *sc = st->priv_data;
+            if (!audio_drm_info_size && st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+                if (video_drm_info_size > 0) {
+                    drm_info[0] = ';';
+                    drm_info++;
+                }
+                audio_drm_info_size = fill_drm_init_info(sc, st->codecpar->codec_type, &drm_info);
+                drm_info += audio_drm_info_size;
+            } else if (!video_drm_info_size && st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+                if (audio_drm_info_size > 0) {
+                    drm_info[0] = ';';
+                    drm_info++;
+                }
+                video_drm_info_size = fill_drm_init_info(sc, st->codecpar->codec_type, &drm_info);
+                drm_info += video_drm_info_size;
+            }
+        }
+        av_log(s, AV_LOG_INFO, "mov drm_info=%s, nb_streams=%d", (*drm_holder), s->nb_streams);
+    }
 
     if (pb->seekable & AVIO_SEEKABLE_NORMAL) {
         if (mov->nb_chapter_tracks > 0 && !mov->ignore_chapters)
