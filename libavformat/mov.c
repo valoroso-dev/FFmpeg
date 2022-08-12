@@ -6839,6 +6839,9 @@ static int mov_read_header(AVFormatContext *s)
         for (i = 0; i < s->nb_streams; i++) {
             AVStream *st = s->streams[i];
             MOVStreamContext *sc = st->priv_data;
+            if (!sc->drm_context) {
+                continue;
+            }
             if (!audio_drm_info_size && st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
                 if (video_drm_info_size > 0) {
                     drm_info[0] = ';';

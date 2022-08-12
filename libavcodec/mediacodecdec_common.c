@@ -280,8 +280,18 @@ static int mediacodec_wrap_sw_buffer(AVCodecContext *avctx,
         frame->sample_rate = avctx->sample_rate;
         frame->channels = avctx->channels;
         frame->channel_layout = avctx->channel_layout;
-        frame->nb_samples = avctx->frame_size;
         frame->format = s->pcm_encoding == 4 ? AV_SAMPLE_FMT_FLT : (s->pcm_encoding == 3 ? AV_SAMPLE_FMT_U8 : AV_SAMPLE_FMT_S16);
+        if (avctx->frame_size) {
+            frame->nb_samples = avctx->frame_size;
+        } else {
+            if (frame->format == AV_SAMPLE_FMT_FLT) {
+                frame->nb_samples = info->size / frame->channels / 4;
+            } else if (frame->format == AV_SAMPLE_FMT_U8) {
+                frame->nb_samples = info->size / frame->channels;
+            } else {
+                frame->nb_samples = info->size / frame->channels / 2;
+            }
+        }
         frame->key_frame = 1;
     } else {
         frame->width = avctx->width;

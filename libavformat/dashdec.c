@@ -1805,11 +1805,12 @@ static int dash_read_header(AVFormatContext *s)
             sprintf(drm_info, "audio,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
         } else if (c->cp_video) {
             sprintf(drm_info, "video,%s,%s,%s", c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
-        } else if (c->cur_audio && c->cur_audio->drm_info && c->cur_video && c->cur_video->drm_info) {
+        } else if (c->cur_audio && c->cur_audio->drm_info && strlen(c->cur_audio->drm_info) &&
+                   c->cur_video && c->cur_video->drm_info && strlen(c->cur_video->drm_info)) {
             sprintf(drm_info, "%s;%s", c->cur_audio->drm_info, c->cur_video->drm_info);
-        } else if (c->cur_audio && c->cur_audio->drm_info) {
+        } else if (c->cur_audio && c->cur_audio->drm_info && strlen(c->cur_audio->drm_info)) {
             sprintf(drm_info, "%s", c->cur_audio->drm_info);
-        } else if (c->cur_video && c->cur_video->drm_info) {
+        } else if (c->cur_video && c->cur_video->drm_info && strlen(c->cur_video->drm_info)) {
             sprintf(drm_info, "%s", c->cur_video->drm_info);
         }
         if (c->cur_audio && c->cur_audio->drm_info) {

@@ -1893,22 +1893,21 @@ int ff_AMediaCodec_CryptoInfo_fill(uint8_t *key_data, uint32_t key_data_size, FF
     memcpy(out->iv, key_data, iv_size);
     key_data += iv_size;
 
-    subsample_count = key_data[0] * 256 + key_data[1];
+    subsample_count = ((key_data[0] << 8) | (key_data[1]));
     key_data += 2;
 
     if (subsample_count > out->numSubSamples) {
         av_freep(&out->numBytesOfClearData);
         av_freep(&out->numBytesOfEncryptedData);
-        out->numBytesOfClearData = av_mallocz(subsample_count);
-        out->numBytesOfEncryptedData = av_mallocz(subsample_count);
+        out->numBytesOfClearData = av_mallocz(subsample_count * sizeof(int32_t));
+        out->numBytesOfEncryptedData = av_mallocz(subsample_count * sizeof(int32_t));
     }
     out->numSubSamples = subsample_count;
 
     for (int i = 0; i < subsample_count; i++) {
-        out->numBytesOfClearData[i] = key_data[0] * 256 + key_data[1];
-        key_data += 2;
-        out->numBytesOfEncryptedData[i] = key_data[0] * 256 * 256 * 256 + key_data[1] * 256 * 256 + key_data[2] * 256 + key_data[3];
-        key_data += 4;
+        out->numBytesOfClearData[i] = ((key_data[0] << 8) | (key_data[1]));
+        out->numBytesOfEncryptedData[i] = (((unsigned)(key_data[2]) << 24) | ((key_data[3]) << 16) | ((key_data[4]) << 8) | (key_data[5]));
+        key_data += 6;
     }
 
     memset(out->key, 0, out->keyLength);
