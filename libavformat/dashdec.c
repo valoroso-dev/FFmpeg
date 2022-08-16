@@ -1798,20 +1798,21 @@ static int dash_read_header(AVFormatContext *s)
 
     if (drm_holder && (*drm_holder)) {
         char *drm_info = *drm_holder;
-        if (c->cp_audio && c->cp_video) {
+        int has_audio_sub_drm_info = (c->cur_audio && c->cur_audio->drm_info && strlen(c->cur_audio->drm_info)) ? 1 : 0;
+        int has_video_sub_drm_info = (c->cur_video && c->cur_video->drm_info && strlen(c->cur_video->drm_info)) ? 1 : 0;
+        if (has_audio_sub_drm_info && has_video_sub_drm_info) {
+            sprintf(drm_info, "%s;%s", c->cur_audio->drm_info, c->cur_video->drm_info);
+        } else if (has_audio_sub_drm_info) {
+            sprintf(drm_info, "%s", c->cur_audio->drm_info);
+        } else if (has_video_sub_drm_info) {
+            sprintf(drm_info, "%s", c->cur_video->drm_info);
+        } else if (c->cp_audio && c->cp_video) {
             sprintf(drm_info, "audio,%s,%s,%s;video,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh,
                                                                c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
         } else if (c->cp_audio) {
             sprintf(drm_info, "audio,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
         } else if (c->cp_video) {
             sprintf(drm_info, "video,%s,%s,%s", c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
-        } else if (c->cur_audio && c->cur_audio->drm_info && strlen(c->cur_audio->drm_info) &&
-                   c->cur_video && c->cur_video->drm_info && strlen(c->cur_video->drm_info)) {
-            sprintf(drm_info, "%s;%s", c->cur_audio->drm_info, c->cur_video->drm_info);
-        } else if (c->cur_audio && c->cur_audio->drm_info && strlen(c->cur_audio->drm_info)) {
-            sprintf(drm_info, "%s", c->cur_audio->drm_info);
-        } else if (c->cur_video && c->cur_video->drm_info && strlen(c->cur_video->drm_info)) {
-            sprintf(drm_info, "%s", c->cur_video->drm_info);
         }
         if (c->cur_audio && c->cur_audio->drm_info) {
             av_freep(&c->cur_audio->drm_info);
