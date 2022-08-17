@@ -158,6 +158,7 @@ struct playlist {
     struct segment **init_sections;
 
     char *drm_info;
+    char *sub_drm_info;
 };
 
 /*
@@ -266,6 +267,7 @@ static void free_playlist_list(HLSContext *c)
             avformat_close_input(&pls->ctx);
         }
         av_freep(&pls->drm_info);
+        av_freep(&pls->sub_drm_info);
         av_free(pls);
     }
     av_freep(&c->playlists);
@@ -1687,6 +1689,8 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
     int ret = 0, i;
     int highest_cur_seq_no = 0;
     char **drm_holder = s->opaque;
+    char *audio_drm_info = NULL;
+    char *video_drm_info = NULL;
 
     c->ctx                = s;
     c->interrupt_callback = &s->interrupt_callback;
@@ -1840,6 +1844,10 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
         pls->ctx->pb       = &pls->pb;
         pls->ctx->io_open  = nested_io_open;
         pls->ctx->flags   |= s->flags & ~AVFMT_FLAG_CUSTOM_IO;
+        if (drm_holder && (*drm_holder) && !pls->sub_drm_info) {
+            pls->sub_drm_info = av_mallocz(1024);
+            pls->ctx->opaque = &pls->sub_drm_info;
+        }
 
         if ((ret = ff_copy_whiteblacklists(pls->ctx, s)) < 0)
             goto fail;
@@ -1881,24 +1889,34 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
         add_metadata_from_renditions(s, pls, AVMEDIA_TYPE_VIDEO);
         add_metadata_from_renditions(s, pls, AVMEDIA_TYPE_SUBTITLE);
 
-        if (drm_holder && (*drm_holder) && pls->drm_info && pls->n_main_streams > 0) {
-            char *drm_info = *drm_holder;
-            char media_type[8];
+        if (pls->drm_info && pls->n_main_streams > 0) {
             AVStream *st = pls->main_streams[0];
             if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-                sprintf(media_type, "%s", "audio");
+                sprintf(pls->drm_info, "%s,%s", "audio", pls->drm_info);
+                if (!audio_drm_info) {
+                    audio_drm_info = (pls->sub_drm_info && strlen(pls->sub_drm_info)) ? pls->sub_drm_info : pls->drm_info;
+                }
             } else if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-                sprintf(media_type, "%s", "video");
+                sprintf(pls->drm_info, "%s,%s", "video", pls->drm_info);
+                if (!video_drm_info) {
+                    video_drm_info = (pls->sub_drm_info && strlen(pls->sub_drm_info)) ? pls->sub_drm_info : pls->drm_info;
+                }
             } else {
-                sprintf(media_type, "%s", "unknown");
+                sprintf(pls->drm_info, "%s,%s", "unknown", pls->drm_info);
             }
-            if (strlen(drm_info) > 0) {
-                sprintf(drm_info, "%s;%s,%s", drm_info, media_type, pls->drm_info);
-            } else {
-                sprintf(drm_info, "%s,%s", media_type, pls->drm_info);
-            }
-            av_log(s, AV_LOG_WARNING, "read hls drm info: '%s'", (*drm_holder));
         }
+    }
+
+    if (drm_holder && (*drm_holder)) {
+        char *out_drm_info = *drm_holder;
+        if (audio_drm_info && video_drm_info) {
+            sprintf(out_drm_info, "%s;%s", audio_drm_info, video_drm_info);
+        } else if (audio_drm_info) {
+            sprintf(out_drm_info, "%s", audio_drm_info);
+        } else if (video_drm_info) {
+            sprintf(out_drm_info, "%s", video_drm_info);
+        }
+        av_log(s, AV_LOG_WARNING, "read hls drm info: '%s'", (*drm_holder));
     }
 
     update_noheader_flag(s);
