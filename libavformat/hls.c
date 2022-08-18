@@ -1844,8 +1844,10 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
         pls->ctx->pb       = &pls->pb;
         pls->ctx->io_open  = nested_io_open;
         pls->ctx->flags   |= s->flags & ~AVFMT_FLAG_CUSTOM_IO;
-        if (drm_holder && (*drm_holder) && !pls->sub_drm_info) {
-            pls->sub_drm_info = av_mallocz(1024);
+        if (drm_holder && (*drm_holder)) {
+            if (!pls->sub_drm_info) {
+                pls->sub_drm_info = av_mallocz(512);
+            }
             pls->ctx->opaque = &pls->sub_drm_info;
         }
 
@@ -1891,18 +1893,16 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
 
         if (pls->drm_info && pls->n_main_streams > 0) {
             AVStream *st = pls->main_streams[0];
+            char old_drm_info[512];
+            memcpy(old_drm_info, pls->drm_info, strlen(pls->drm_info) + 1);
             if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-                sprintf(pls->drm_info, "%s,%s", "audio", pls->drm_info);
-                if (!audio_drm_info) {
-                    audio_drm_info = (pls->sub_drm_info && strlen(pls->sub_drm_info)) ? pls->sub_drm_info : pls->drm_info;
-                }
+                sprintf(pls->drm_info, "%s,%s", "audio", old_drm_info);
+                audio_drm_info = (pls->sub_drm_info && strlen(pls->sub_drm_info)) ? pls->sub_drm_info : pls->drm_info;
             } else if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-                sprintf(pls->drm_info, "%s,%s", "video", pls->drm_info);
-                if (!video_drm_info) {
-                    video_drm_info = (pls->sub_drm_info && strlen(pls->sub_drm_info)) ? pls->sub_drm_info : pls->drm_info;
-                }
+                sprintf(pls->drm_info, "%s,%s", "video", old_drm_info);
+                video_drm_info = (pls->sub_drm_info && strlen(pls->sub_drm_info)) ? pls->sub_drm_info : pls->drm_info;
             } else {
-                sprintf(pls->drm_info, "%s,%s", "unknown", pls->drm_info);
+                sprintf(pls->drm_info, "%s,%s", "unknown", old_drm_info);
             }
         }
     }

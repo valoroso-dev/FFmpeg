@@ -1749,7 +1749,7 @@ static int dash_read_header(AVFormatContext *s)
     /* Open the demuxer for curent video and current audio components if available */
     if (!ret && c->cur_video) {
         if (drm_holder && (*drm_holder) && !c->cur_video->drm_info) {
-            c->cur_video->drm_info = av_mallocz(1024);
+            c->cur_video->drm_info = av_mallocz(512);
         }
         ret = open_demux_for_component(s, c->cur_video);
         if (!ret) {
@@ -1763,7 +1763,7 @@ static int dash_read_header(AVFormatContext *s)
 
     if (!ret && c->cur_audio) {
         if (drm_holder && (*drm_holder) && !c->cur_audio->drm_info) {
-            c->cur_audio->drm_info = av_mallocz(1024);
+            c->cur_audio->drm_info = av_mallocz(512);
         }
         ret = open_demux_for_component(s, c->cur_audio);
         if (!ret) {
