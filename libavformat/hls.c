@@ -1309,6 +1309,20 @@ static int64_t default_reload_interval(struct playlist *pls)
                           pls->target_duration;
 }
 
+static int64_t seek_data(void *opaque, int64_t offset, int whence)
+{
+    struct playlist *v = opaque;
+    if (v->n_segments && v->finished) {
+        if (whence & AVSEEK_SIZE) {
+            return (v->input && v->input->seek) ? v->input->seek(v->input->opaque, offset, AVSEEK_SIZE) : AVERROR(ENOSYS);
+        }
+
+        return offset;
+    }
+
+    return AVERROR(ENOSYS);
+}
+
 static int read_data(void *opaque, uint8_t *buf, int buf_size)
 {
     struct playlist *v = opaque;
@@ -1828,9 +1842,15 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
             pls->ctx = NULL;
             goto fail;
         }
-        ffio_init_context(&pls->pb, pls->read_buffer, INITIAL_BUFFER_SIZE, 0, pls,
-                          read_data, NULL, NULL);
-        pls->pb.seekable = 0;
+        if (pls->finished && pls->drm_info) {
+            ffio_init_context(&pls->pb, pls->read_buffer, INITIAL_BUFFER_SIZE, 0, pls,
+                              read_data, NULL, seek_data);
+            pls->pb.seekable = AVIO_SEEKABLE_NORMAL;
+        } else {
+            ffio_init_context(&pls->pb, pls->read_buffer, INITIAL_BUFFER_SIZE, 0, pls,
+                              read_data, NULL, NULL);
+            pls->pb.seekable = 0;
+        }
         ret = av_probe_input_buffer(&pls->pb, &in_fmt, pls->segments[0]->url,
                                     NULL, 0, 0);
         if (ret < 0) {
@@ -2254,6 +2274,10 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
              * specified stream where we should look for the keyframes */
             pls->seek_stream_index = -1;
             pls->seek_flags |= AVSEEK_FLAG_ANY;
+        }
+
+        if (pls->finished && pls->drm_info && pls->ctx->iformat && pls->ctx->iformat->read_seek) {
+            av_seek_frame(pls->ctx, -1, seek_timestamp, flags);
         }
     }
 
