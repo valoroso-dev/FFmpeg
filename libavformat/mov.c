@@ -6857,7 +6857,6 @@ static int mov_read_header(AVFormatContext *s)
                 video_drm_info_size = fill_drm_init_info(sc, st->codecpar->codec_type, &drm_info);
                 drm_info += video_drm_info_size;
             }
-            sc->drm_context->has_new_pssh_updated = 0;
         }
         av_log(s, AV_LOG_INFO, "mov drm_info=%s, nb_streams=%d", (*drm_holder), s->nb_streams);
     }
@@ -7289,16 +7288,16 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
 
     sc->last_sample = current_index;
     if (sc->drm_context) {
-        if (sc->drm_context->has_new_pssh_updated) {
+        ret = read_cenc_data(mov, sc, current_index, pkt);
+        if (ret) {
+            return ret;
+        }
+        if (pkt->flags & AV_PKT_FLAG_ENCRYPTED && sc->drm_context->has_new_pssh_updated) {
             sc->drm_context->has_new_pssh_updated = 0;
             ret = read_drm_init_info(mov, sc, current_index, pkt, st->codecpar->codec_type);
             if (ret) {
                 return ret;
             }
-        }
-        ret = read_cenc_data(mov, sc, current_index, pkt);
-        if (ret) {
-            return ret;
         }
     } else if (sc->cenc.aes_ctr) {
         ret = cenc_filter(mov, sc, current_index, pkt->data, pkt->size, pkt->pos);
