@@ -5664,8 +5664,9 @@ static int mov_read_senc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     }
 
     if (sc->drm_context) {
-        av_log(c->fc, AV_LOG_INFO, "drm cenc: is_sample_encrypted:%d, sample_encrypted_count=%zu, sample_key_size=%d, auxiliary_info_size=%zu\n",
-                enc_info->use_subsamples, enc_info->encrypted_sample_count, enc_info->auxiliary_info_default_size, auxiliary_info_size);
+        av_log(c->fc, AV_LOG_INFO, "drm cenc: use_subsamples:%d, sample_encrypted_count=%zu, single_auxi_size=%d, total_auxi_size=%zu, iv_size=%d,%d\n",
+                enc_info->use_subsamples, enc_info->encrypted_sample_count, enc_info->auxiliary_info_default_size, auxiliary_info_size,
+                sc->drm_context->default_iv_size, sc->drm_context->default_constant_iv_size);
         return 0;
     }
     /* initialize the cipher */
@@ -5885,7 +5886,11 @@ static int read_cenc_data(MOVContext *c, MOVStreamContext *sc, int64_t index, AV
         iv_size = sc->drm_context->default_constant_iv_size;
     }
     if (enc_info->use_subsamples) {
-        subsample_size = enc_info->auxiliary_info_default_size - sc->drm_context->default_iv_size;
+        if (enc_info->auxiliary_info_default_size) {
+            subsample_size = enc_info->auxiliary_info_default_size - sc->drm_context->default_iv_size;
+        } else {
+            subsample_size = enc_info->auxiliary_info_sizes[enc_index] - sc->drm_context->default_iv_size;
+        }
     } else {
         subsample_size = 8;
     }
@@ -5927,7 +5932,7 @@ static int read_cenc_data(MOVContext *c, MOVStreamContext *sc, int64_t index, AV
         side += sc->drm_context->default_constant_iv_size;
     }
 
-    if (enc_info->use_subsamples) {
+    if (enc_info->use_subsamples && subsample_size) {
         memcpy(side, enc_info->auxiliary_info_pos, subsample_size);
         enc_info->auxiliary_info_pos += subsample_size;
         side += subsample_size;
@@ -7287,7 +7292,7 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
         aax_filter(pkt->data, pkt->size, mov);
 
     sc->last_sample = current_index;
-    if (sc->drm_context) {
+    if (sc->drm_context && sc->drm_context->default_is_encrypted) {
         ret = read_cenc_data(mov, sc, current_index, pkt);
         if (ret) {
             return ret;
