@@ -3641,7 +3641,13 @@ FF_ENABLE_DEPRECATION_WARNINGS
     const int all_streams_processed = (0x1 << ic->nb_streams) -1;
     int streams_decode_state = 0;
 #define STATE_GET(n) ((streams_decode_state >> (n)) & (0x1))
-#define STATE_SET(n) (streams_decode_state |= ((0x1) << (n)))
+#define STATE_SET(n, frame_meida_type) \
+    { \
+        streams_decode_state |= ((0x1) << (n)); \
+        if (ic->control_message_cb) { \
+            ic->control_message_cb(ic, frame_meida_type ,NULL, 0); \
+        } \
+    }
     read_size = 0;
     for (;;) {
         int analyzed_all_streams;
@@ -3877,7 +3883,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
                     nextstate = try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL) > 0 ? 1 : 0;
                 }
                 if(nextstate) {
-                    STATE_SET(index);
+                    STATE_SET(index, st->codecpar->codec_type);
                 }
                 av_log(ic, AV_LOG_DEBUG, "Rapid avformat_find_stream_info for loop try_decode_frame start pkt.size=%d,stream_index=%d,state=%d\n",pkt->size,pkt->stream_index,streams_decode_state);
             }

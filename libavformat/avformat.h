@@ -1923,7 +1923,9 @@ typedef struct AVFormatContext {
      */
     int max_streams;
 
+    // custom properties
     int live_quick_start;
+    void* owner;
 } AVFormatContext;
 
 /**
