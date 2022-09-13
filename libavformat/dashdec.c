@@ -1748,11 +1748,23 @@ static int dash_read_header(AVFormatContext *s)
     if (!ret && c->cur_video) {
         if (drm_holder && (*drm_holder) && !c->cur_video->drm_info) {
             c->cur_video->drm_info = av_mallocz(512);
+            if (!c->cur_video->drm_info) {
+                av_log(s, AV_LOG_ERROR, "cant mallocz cur_video drm_info\n");
+                ret = AVERROR(ENOMEM);
+                goto fail;
+            }
         }
         ret = open_demux_for_component(s, c->cur_video);
         if (!ret) {
             c->cur_video->stream_index = stream_index;
             ++stream_index;
+            if (!strlen(c->cur_video->drm_info) && c->cp_video) {
+                sprintf(c->cur_video->drm_info, "video,%s,%s,%s", c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
+            }
+            if (c->cur_video->drm_info && strlen(c->cur_video->drm_info)) {
+                sprintf(*drm_holder, "%s", c->cur_video->drm_info);
+                ff_check_interrupt(&s->drm_update_callback);
+            }
         } else {
             free_representation(c->cur_video);
             c->cur_video = NULL;
@@ -1762,11 +1774,23 @@ static int dash_read_header(AVFormatContext *s)
     if (!ret && c->cur_audio) {
         if (drm_holder && (*drm_holder) && !c->cur_audio->drm_info) {
             c->cur_audio->drm_info = av_mallocz(512);
+            if (!c->cur_audio->drm_info) {
+                av_log(s, AV_LOG_ERROR, "cant mallocz cur_audio drm_info\n");
+                ret = AVERROR(ENOMEM);
+                goto fail;
+            }
         }
         ret = open_demux_for_component(s, c->cur_audio);
         if (!ret) {
             c->cur_audio->stream_index = stream_index;
             ++stream_index;
+            if (!strlen(c->cur_audio->drm_info) && c->cp_audio) {
+                sprintf(c->cur_audio->drm_info, "audio,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
+            }
+            if (c->cur_audio->drm_info && strlen(c->cur_audio->drm_info)) {
+                sprintf(*drm_holder, "%s", c->cur_audio->drm_info);
+                ff_check_interrupt(&s->drm_update_callback);
+            }
         } else {
             free_representation(c->cur_audio);
             c->cur_audio = NULL;
@@ -1804,13 +1828,6 @@ static int dash_read_header(AVFormatContext *s)
             sprintf(drm_info, "%s", c->cur_audio->drm_info);
         } else if (has_video_sub_drm_info) {
             sprintf(drm_info, "%s", c->cur_video->drm_info);
-        } else if (c->cp_audio && c->cp_video) {
-            sprintf(drm_info, "audio,%s,%s,%s;video,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh,
-                                                               c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
-        } else if (c->cp_audio) {
-            sprintf(drm_info, "audio,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
-        } else if (c->cp_video) {
-            sprintf(drm_info, "video,%s,%s,%s", c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
         }
         if (c->cur_audio && c->cur_audio->drm_info) {
             av_freep(&c->cur_audio->drm_info);

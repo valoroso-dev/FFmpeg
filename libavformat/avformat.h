@@ -1924,6 +1924,8 @@ typedef struct AVFormatContext {
     int max_streams;
 
     int live_quick_start;
+
+    AVIOInterruptCB drm_update_callback;
 } AVFormatContext;
 
 /**

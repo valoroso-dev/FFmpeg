@@ -3030,8 +3030,7 @@ static int mov_read_sgpd(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         if (ret < 0)
             return ret;
     }
-    // av_log(c->fc, AV_LOG_INFO, "mov_read_sgpd is_encrypted=%d,pattern=%d,kid=%s,constant_iv=%s", sc->drm_context->default_is_encrypted,
-    //         pattern, sc->drm_context->default_kid, sc->drm_context->default_constant_iv);
+    av_log(c->fc, AV_LOG_INFO, "mov_read_sgpd is_encrypted=%d,pattern=%d\n", sc->drm_context->default_is_encrypted, pattern);
 
     return 0;
 }
@@ -5605,9 +5604,8 @@ static int mov_read_tenc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         if (ret < 0)
             return ret;
     }
+    av_log(c->fc, AV_LOG_INFO, "mov_read_tenc is_encrypted=%d,pattern=%d", sc->drm_context->default_is_encrypted, pattern);
 
-    // av_log(c->fc, AV_LOG_INFO, "mov_read_tenc is_encrypted=%d,pattern=%d,kid=%s,constant_iv=%s", sc->drm_context->default_is_encrypted,
-    //         pattern, sc->drm_context->default_kid, sc->drm_context->default_constant_iv);
     return 0;
 }
 
@@ -5637,6 +5635,10 @@ static int mov_read_senc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     enc_info->use_subsamples = avio_rb24(pb) & 0x02; /* flags */
 
     enc_info->encrypted_sample_count = avio_rb32(pb); /* entries */
+    if (enc_info->encrypted_sample_count != enc_info->sample_count) {
+        av_log(c->fc, AV_LOG_ERROR, "senc entries %zu not equals to sample count %d\n", enc_info->encrypted_sample_count, enc_info->sample_count);
+        return AVERROR_INVALIDDATA;
+    }
 
     if (atom.size < 8 || atom.size > FFMIN(INT_MAX, SIZE_MAX)) {
         av_log(c->fc, AV_LOG_ERROR, "senc atom size %"PRId64" invalid\n", atom.size);
