@@ -1718,6 +1718,7 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
     char video_drm_info[512];
     int audio_drm_info_size = 0;
     int video_drm_info_size = 0;
+    AVDictionary  *in_fmt_opts = NULL;
 
     c->ctx                = s;
     c->interrupt_callback = &s->interrupt_callback;
@@ -1881,7 +1882,11 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
         if ((ret = ff_copy_whiteblacklists(pls->ctx, s)) < 0)
             goto fail;
 
-        ret = avformat_open_input(&pls->ctx, pls->segments[0]->url, in_fmt, NULL);
+        if (in_fmt && !strcmp(in_fmt->name, "mov,mp4,m4a,3gp,3g2,mj2")) {
+            av_dict_set_int(&in_fmt_opts, "mov_enable_seek_detect", 1, 0);
+        }
+        ret = avformat_open_input(&pls->ctx, pls->segments[0]->url, in_fmt, &in_fmt_opts);
+        av_dict_free(&in_fmt_opts);
         if (ret < 0)
             goto fail;
 
