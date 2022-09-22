@@ -94,6 +94,7 @@ typedef struct MOVFragment {
     unsigned size;
     unsigned flags;
     int64_t time;
+    uint32_t sample_count;
 } MOVFragment;
 
 typedef struct MOVTrackExt {
@@ -127,6 +128,47 @@ typedef struct MOVIndexRange {
     int64_t end;
 } MOVIndexRange;
 
+typedef struct MOVDrmContext {
+    // read from schm box
+    uint8_t scheme_type;
+    uint32_t scheme_version;
+    char *scheme_uri;
+    // read from pssh box
+    int has_new_pssh_updated;
+    uint8_t *uuid;
+    uint8_t *pssh_data;
+    uint32_t pssh_data_size;
+    // read from tenc box or sgpd box
+    uint8_t default_crypto_byte_block;
+    uint8_t default_skip_byte_block;
+    uint8_t default_is_encrypted;
+    uint8_t default_iv_size;
+    uint8_t default_kid[16];
+    uint8_t default_constant_iv_size;
+    uint8_t *default_constant_iv;
+} MOVDrmContext;
+
+typedef struct MOVEncryptionInfo {
+    uint64_t moof_offset;
+    uint32_t sample_count;
+    int64_t *sample_pos;
+
+    // read from senc
+    int use_subsamples;
+    size_t encrypted_sample_count;
+    uint8_t* auxiliary_info;
+    uint8_t* auxiliary_info_end;
+    uint8_t* auxiliary_info_pos;
+    // read from saiz
+    uint8_t auxiliary_info_default_size;
+    uint8_t* auxiliary_info_sizes;
+    size_t auxiliary_info_sizes_count;
+
+    int64_t auxiliary_info_index;
+
+    struct MOVEncryptionInfo *next;
+} MOVEncryptionInfo;
+
 typedef struct MOVStreamContext {
     AVIOContext *pb;
     int pb_is_copied;
@@ -158,6 +200,7 @@ typedef struct MOVStreamContext {
     int *keyframes;
     int time_scale;
     int64_t time_offset;  ///< time offset of the edit list entries
+    int last_sample;
     int current_sample;
     int64_t current_index;
     MOVIndexRange* index_ranges;
@@ -204,16 +247,13 @@ typedef struct MOVStreamContext {
 
     int has_sidx;  // If there is an sidx entry for this stream.
     struct {
-        int use_subsamples;
-        uint8_t* auxiliary_info;
-        uint8_t* auxiliary_info_end;
-        uint8_t* auxiliary_info_pos;
-        uint8_t auxiliary_info_default_size;
-        uint8_t* auxiliary_info_sizes;
-        size_t auxiliary_info_sizes_count;
-        int64_t auxiliary_info_index;
+        MOVEncryptionInfo *enc_list;
+        size_t enc_size;
+
         struct AVAESCTR* aes_ctr;
     } cenc;
+
+    MOVDrmContext *drm_context;
 } MOVStreamContext;
 
 typedef struct MOVContext {
@@ -266,6 +306,9 @@ typedef struct MOVContext {
     int decryption_key_len;
     int enable_drefs;
     int32_t movie_display_matrix[3][3]; ///< display matrix from mvhd
+    int is_live;
+    int enable_seek_detect;
+    int64_t last_pos;
 } MOVContext;
 
 int ff_mp4_read_descr_len(AVIOContext *pb);

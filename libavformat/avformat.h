@@ -1926,6 +1926,7 @@ typedef struct AVFormatContext {
     // custom properties
     int live_quick_start;
     void* owner;
+    AVIOInterruptCB drm_update_callback;
 } AVFormatContext;
 
 /**

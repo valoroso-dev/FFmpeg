@@ -156,6 +156,9 @@ struct playlist {
      * playlist, if any. */
     int n_init_sections;
     struct segment **init_sections;
+
+    char *drm_info;
+    char *sub_drm_info;
 };
 
 /*
@@ -263,6 +266,8 @@ static void free_playlist_list(HLSContext *c)
             pls->ctx->pb = NULL;
             avformat_close_input(&pls->ctx);
         }
+        av_freep(&pls->drm_info);
+        av_freep(&pls->sub_drm_info);
         av_free(pls);
     }
     av_freep(&c->playlists);
@@ -375,8 +380,9 @@ static void handle_variant_args(struct variant_info *info, const char *key,
 
 struct key_info {
      char uri[MAX_URL_SIZE];
-     char method[11];
+     char method[16];
      char iv[35];
+     char format[64];
 };
 
 static void handle_key_args(struct key_info *info, const char *key,
@@ -391,6 +397,9 @@ static void handle_key_args(struct key_info *info, const char *key,
     } else if (!strncmp(key, "IV=", key_len)) {
         *dest     =        info->iv;
         *dest_len = sizeof(info->iv);
+    } else if (!strncmp(key, "KEYFORMAT=", key_len)) {
+        *dest     =        info->format;
+        *dest_len = sizeof(info->format);
     }
 }
 
@@ -737,6 +746,7 @@ static int parse_playlist(HLSContext *c, const char *url,
                                &variant_info);
         } else if (av_strstart(line, "#EXT-X-KEY:", &ptr)) {
             struct key_info info = {{0}};
+            char pls_drm_info[MAX_URL_SIZE];
             ff_parse_key_value(ptr, (ff_parse_key_val_cb) handle_key_args,
                                &info);
             key_type = KEY_NONE;
@@ -750,6 +760,20 @@ static int parse_playlist(HLSContext *c, const char *url,
                 has_iv = 1;
             }
             av_strlcpy(key, info.uri, sizeof(key));
+
+            if (!strcmp(info.format, "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed")) {
+                key_type = KEY_NONE;
+                has_iv = 0;
+                if (!pls->drm_info) {
+                    sprintf(pls_drm_info, "%s,%s,%s", ((!strcmp(info.method, "SAMPLE-AES-CTR") || !strcmp(info.method, "SAMPLE-AES-CENC")) ? "cenc" : "cbcs"),
+                                                      info.format,
+                                                      (strstr(info.uri, "data:text/plain;base64,") ? info.uri + 23 : "unknown"));
+                    pls->drm_info = av_strdup(pls_drm_info);
+                }
+            } else if (pls->drm_info) {
+                key_type = KEY_NONE;
+                has_iv = 0;
+            }
         } else if (av_strstart(line, "#EXT-X-MEDIA:", &ptr)) {
             struct rendition_info info = {{0}};
             ff_parse_key_value(ptr, (ff_parse_key_val_cb) handle_rendition_args,
@@ -1124,6 +1148,21 @@ static void intercept_id3(struct playlist *pls, uint8_t *buf,
         pls->is_id3_timestamped = (pls->id3_mpegts_timestamp != AV_NOPTS_VALUE);
 }
 
+static int need_clear_dns(char *uri1, char *uri2)
+{
+    char hostname1[1024],hostname2[1024],proto[1024],path[1024];
+    int port1, port2;
+    av_url_split(proto, sizeof(proto), NULL, 0, hostname1, sizeof(hostname1),
+        &port1, path, sizeof(path), uri1);
+    av_url_split(proto, sizeof(proto), NULL, 0, hostname2, sizeof(hostname2),
+        &port2, path, sizeof(path), uri2);
+    av_log(NULL, AV_LOG_DEBUG, "need_clear_dns %s:%d, %s:%d", hostname1, port1, hostname2, port2);
+    if (!strcmp(hostname1, hostname2) && port1 != port2) {
+        return 1;
+    }
+    return 0;
+}
+
 static int open_input(HLSContext *c, struct playlist *pls, struct segment *seg)
 {
     AVDictionary *opts = NULL;
@@ -1154,7 +1193,15 @@ static int open_input(HLSContext *c, struct playlist *pls, struct segment *seg)
         char iv[33], key[33], url[MAX_URL_SIZE];
         if (strcmp(seg->key, pls->key_url)) {
             AVIOContext *pb;
-            if (open_url(pls->parent, &pb, seg->key, c->avio_opts, opts, NULL) == 0) {
+            av_dict_copy(&opts2, c->avio_opts, 0);
+            if (need_clear_dns(seg->key, seg->url)) {
+                // force parsing dns on new thread to avoid get same socket for same hostname but different port
+                av_dict_set_int(&opts2, "addrinfo_timeout", 100, 0);
+                av_dict_set_int(&opts2, "dns_cache_timeout", 100, 0);
+                av_dict_set_int(&opts2, "dns_cache_clear", 1, 0);
+                av_log(NULL, AV_LOG_WARNING, "force parsing dns on new thread");
+            }
+            if (open_url(pls->parent, &pb, seg->key, opts2, opts, NULL) == 0) {
                 ret = avio_read(pb, pls->key, sizeof(pls->key));
                 if (ret != sizeof(pls->key)) {
                     av_log(NULL, AV_LOG_ERROR, "Unable to read key file %s\n",
@@ -1166,6 +1213,8 @@ static int open_input(HLSContext *c, struct playlist *pls, struct segment *seg)
                        seg->key);
             }
             av_strlcpy(pls->key_url, seg->key, sizeof(pls->key_url));
+            av_dict_free(&opts2);
+            opts2 = NULL;
         }
         ff_data_to_hex(iv, seg->iv, sizeof(seg->iv), 0);
         ff_data_to_hex(key, pls->key, sizeof(pls->key), 0);
@@ -1258,6 +1307,7 @@ static int update_init_section(struct playlist *pls, struct segment *seg)
     sec_size = FFMIN(sec_size, max_init_section_size);
 
     av_fast_malloc(&pls->init_sec_buf, &pls->init_sec_buf_size, sec_size);
+    pls->init_sec_buf_size = sec_size;
 
     ret = read_from_url(pls, seg->init_section, pls->init_sec_buf,
                         pls->init_sec_buf_size, READ_COMPLETE);
@@ -1663,6 +1713,12 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
     HLSContext *c = s->priv_data;
     int ret = 0, i;
     int highest_cur_seq_no = 0;
+    char **drm_holder = s->opaque;
+    char audio_drm_info[512];
+    char video_drm_info[512];
+    int audio_drm_info_size = 0;
+    int video_drm_info_size = 0;
+    AVDictionary  *in_fmt_opts = NULL;
 
     c->ctx                = s;
     c->interrupt_callback = &s->interrupt_callback;
@@ -1816,11 +1872,21 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
         pls->ctx->pb       = &pls->pb;
         pls->ctx->io_open  = nested_io_open;
         pls->ctx->flags   |= s->flags & ~AVFMT_FLAG_CUSTOM_IO;
+        if (drm_holder && (*drm_holder)) {
+            if (!pls->sub_drm_info) {
+                pls->sub_drm_info = av_mallocz(512);
+            }
+            pls->ctx->opaque = &pls->sub_drm_info;
+        }
 
         if ((ret = ff_copy_whiteblacklists(pls->ctx, s)) < 0)
             goto fail;
 
-        ret = avformat_open_input(&pls->ctx, pls->segments[0]->url, in_fmt, NULL);
+        if (in_fmt && !strcmp(in_fmt->name, "mov,mp4,m4a,3gp,3g2,mj2")) {
+            av_dict_set_int(&in_fmt_opts, "mov_enable_seek_detect", 1, 0);
+        }
+        ret = avformat_open_input(&pls->ctx, pls->segments[0]->url, in_fmt, &in_fmt_opts);
+        av_dict_free(&in_fmt_opts);
         if (ret < 0)
             goto fail;
 
@@ -1856,6 +1922,39 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
         add_metadata_from_renditions(s, pls, AVMEDIA_TYPE_AUDIO);
         add_metadata_from_renditions(s, pls, AVMEDIA_TYPE_VIDEO);
         add_metadata_from_renditions(s, pls, AVMEDIA_TYPE_SUBTITLE);
+
+        if (drm_holder && (*drm_holder) && pls->n_main_streams > 0) {
+            AVStream *st = pls->main_streams[0];
+            if (!audio_drm_info_size && st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+                if (pls->sub_drm_info && strlen(pls->sub_drm_info)) {
+                    sprintf(audio_drm_info, "%s", pls->sub_drm_info);
+                    audio_drm_info_size = strlen(audio_drm_info);
+                } else if (pls->drm_info && strlen(pls->drm_info)) {
+                    sprintf(audio_drm_info, "%s,%s", "audio", pls->drm_info);
+                    audio_drm_info_size = strlen(audio_drm_info);
+                }
+            } else if (!video_drm_info_size && st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+                if (pls->sub_drm_info && strlen(pls->sub_drm_info)) {
+                    sprintf(video_drm_info, "%s", pls->sub_drm_info);
+                    video_drm_info_size = strlen(video_drm_info);
+                } else if (pls->drm_info && strlen(pls->drm_info)) {
+                    sprintf(video_drm_info, "%s,%s", "video", pls->drm_info);
+                    video_drm_info_size = strlen(video_drm_info);
+                }
+            }
+        }
+    }
+
+    if (drm_holder && (*drm_holder)) {
+        char *out_drm_info = *drm_holder;
+        if (audio_drm_info_size && video_drm_info_size) {
+            sprintf(out_drm_info, "%s;%s", audio_drm_info, video_drm_info);
+        } else if (audio_drm_info_size) {
+            sprintf(out_drm_info, "%s", audio_drm_info);
+        } else if (video_drm_info_size) {
+            sprintf(out_drm_info, "%s", video_drm_info);
+        }
+        av_log(s, AV_LOG_WARNING, "read hls drm info: '%s'", (*drm_holder));
     }
 
     update_noheader_flag(s);

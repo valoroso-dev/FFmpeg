@@ -113,6 +113,17 @@ struct representation {
     uint32_t init_sec_buf_read_offset;
     int64_t cur_timestamp;
     int is_restart_needed;
+
+    char* drm_info;
+};
+
+struct contentprotection {
+    /* drm info */
+    char *scheme_type;
+    char *scheme_id_uri;
+    char *default_kid;
+    char *cenc_pssh;
+    int completed;
 };
 
 typedef struct DASHContext {
@@ -141,6 +152,10 @@ typedef struct DASHContext {
     char *headers;                       ///< holds HTTP headers set as an AVOption to the HTTP protocol context
     char *allowed_extensions;
     AVDictionary *avio_opts;
+
+    struct contentprotection *cp_video;
+    struct contentprotection *cp_audio;
+    int index_drm_first;
 } DASHContext;
 
 static uint64_t get_current_time_in_sec(void)
@@ -328,7 +343,31 @@ static void free_representation(struct representation *pls)
     }
 
     av_freep(&pls->url_template);
+    av_freep(&pls->drm_info);
     av_freep(pls);
+}
+
+static struct contentprotection* new_contentprotection(void)
+{
+    struct contentprotection *out;
+    out = av_mallocz(sizeof(struct contentprotection));
+    out->scheme_type = av_strdup("cenc");//If there is no scheme information, assume patternless AES-CTR.
+    out->scheme_id_uri = av_strdup("unknown");
+    out->default_kid = av_strdup("unknown");
+    out->cenc_pssh = av_strdup("unknown");
+    out->completed = 0;
+    av_log(NULL, AV_LOG_WARNING, "new contentprotection");
+    return out;
+}
+
+static void free_contentprotection(struct contentprotection *con)
+{
+    av_freep(&con->scheme_type);
+    av_freep(&con->scheme_id_uri);
+    av_freep(&con->default_kid);
+    av_freep(&con->cenc_pssh);
+    av_freep(&con);
+    av_log(NULL, AV_LOG_WARNING, "free contentprotection");
 }
 
 static void set_httpheader_options(DASHContext *c, AVDictionary *opts)
@@ -577,6 +616,88 @@ static int parse_manifest_segmenturlnode(AVFormatContext *s, struct representati
     return 0;
 }
 
+static int parse_manifest_contentprotection(AVFormatContext *s, struct contentprotection *con,
+                                            xmlNodePtr contentprotection_node, enum AVMediaType type) {
+    xmlNodePtr contentprotection_cenc_pssh_node = NULL;
+    char *text;
+    char *scheme_id_uri;
+    char *scheme_type;
+    char *default_kid;
+    int has_get_valid_contentprotection = 0;
+    DASHContext *c = s->priv_data;
+    char **drm_holder = s->opaque;
+
+    if (!con) {
+        return AVERROR(ENOMEM);
+    }
+
+    scheme_id_uri = xmlGetProp(contentprotection_node, "schemeIdUri");
+    if (!scheme_id_uri) {
+        return AVERROR(EINVAL);
+    }
+
+    if (!av_strcasecmp(scheme_id_uri, (const char *)"urn:mpeg:dash:mp4protection:2011")) {
+        // parse scheme type
+        scheme_type = xmlGetProp(contentprotection_node, "value");
+        if (scheme_type) {
+            if (con->scheme_type) {
+                av_freep(&con->scheme_type);
+            }
+            con->scheme_type = av_strdup(scheme_type);
+            xmlFree(scheme_type);
+        }
+
+        default_kid = xmlGetProp(contentprotection_node, "default_KID");
+        if (default_kid) {
+            if (con->default_kid) {
+                av_freep(&con->default_kid);
+            }
+            con->default_kid = av_strdup(default_kid);
+            xmlFree(default_kid);
+        }
+        av_log(s, AV_LOG_WARNING, "parse manifest contentprotection scheme type %s %s", con->scheme_type, con->default_kid);
+        has_get_valid_contentprotection = 1;
+    } else if (!av_strcasecmp(scheme_id_uri, (const char *)"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed")) {
+        if (con->scheme_id_uri) {
+            av_freep(&con->scheme_id_uri);
+        }
+        con->scheme_id_uri = av_strdup(scheme_id_uri);
+
+        contentprotection_cenc_pssh_node = find_child_node_by_name(contentprotection_node, "pssh");
+        if (contentprotection_cenc_pssh_node) {
+            text = xmlNodeGetContent(contentprotection_cenc_pssh_node);
+            if (text) {
+                if (con->cenc_pssh) {
+                    av_freep(&con->cenc_pssh);
+                }
+                con->cenc_pssh = av_strdup(text);
+                xmlFree(text);
+                con->completed = 1;
+            }
+            av_log(s, AV_LOG_WARNING, "parse manifest contentprotection %s %s %s %s",
+                con->scheme_type, con->scheme_id_uri, con->default_kid, con->cenc_pssh);
+            has_get_valid_contentprotection = 1;
+            if (c->index_drm_first && con->completed && drm_holder && (*drm_holder)) {
+                if (type == AVMEDIA_TYPE_AUDIO) {
+                    sprintf(*drm_holder, "audio,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
+                    ff_check_interrupt(&s->drm_update_callback);
+                } else if (type == AVMEDIA_TYPE_VIDEO) {
+                    sprintf(*drm_holder, "video,%s,%s,%s", c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
+                    ff_check_interrupt(&s->drm_update_callback);
+                }
+            }
+        }
+    } else {
+        av_log(s, AV_LOG_ERROR, "not support schemeIdUri: '%s'\n", scheme_id_uri);
+    }
+    xmlFree(scheme_id_uri);
+
+    if (has_get_valid_contentprotection) {
+        return 0;
+    }
+    return AVERROR(EINVAL);
+}
+
 static int parse_manifest_segmenttimeline(AVFormatContext *s, struct representation *rep,
                                           xmlNodePtr fragment_timeline_node)
 {
@@ -663,6 +784,7 @@ static int parse_manifest_representation(AVFormatContext *s, const char *url,
             ret = AVERROR(ENOMEM);
             goto end;
         }
+        rep->parent = s;
         representation_segmenttemplate_node = find_child_node_by_name(representation_node, "SegmentTemplate");
         representation_baseurl_node = find_child_node_by_name(representation_node, "BaseURL");
         representation_segmentlist_node = find_child_node_by_name(representation_node, "SegmentList");
@@ -828,6 +950,7 @@ static int parse_manifest_adaptationset(AVFormatContext *s, const char *url,
                                         xmlNodePtr mpd_baseurl_node,
                                         xmlNodePtr period_baseurl_node)
 {
+    DASHContext *c = s->priv_data;
     int ret = 0;
     xmlNodePtr fragment_template_node = NULL;
     xmlNodePtr content_component_node = NULL;
@@ -842,6 +965,19 @@ static int parse_manifest_adaptationset(AVFormatContext *s, const char *url,
             content_component_node = node;
         } else if (!av_strcasecmp(node->name, (const char *)"BaseURL")) {
             adaptionset_baseurl_node = node;
+        } else if (!av_strcasecmp(node->name, (const char *)"ContentProtection")) {
+            enum AVMediaType type = get_content_type(adaptionset_node);
+            if (type == AVMEDIA_TYPE_VIDEO) {
+                if (!c->cp_video) {
+                    c->cp_video = new_contentprotection();
+                }
+                parse_manifest_contentprotection(s, c->cp_video, node, AVMEDIA_TYPE_VIDEO);
+            } else if (type == AVMEDIA_TYPE_AUDIO) {
+                if (!c->cp_audio) {
+                    c->cp_audio = new_contentprotection();
+                }
+                parse_manifest_contentprotection(s, c->cp_audio, node, AVMEDIA_TYPE_AUDIO);
+            }
         } else if (!av_strcasecmp(node->name, (const char *)"Representation")) {
             ret = parse_manifest_representation(s, url, node,
                                                 adaptionset_node,
@@ -1042,15 +1178,13 @@ static int64_t calc_cur_seg_no(AVFormatContext *s, struct representation *pls)
         if (pls->n_fragments) {
             num = pls->first_seq_no;
         } else if (pls->n_timelines) {
-            start_time_offset = get_segment_start_time_based_on_timeline(pls, 0xFFFFFFFF) - pls->timelines[pls->first_seq_no]->starttime; // total duration of playlist
-            if (start_time_offset < 60 * pls->fragment_timescale)
-                start_time_offset = 0;
-            else
-                start_time_offset = start_time_offset - 60 * pls->fragment_timescale;
-
-            num = calc_next_seg_no_from_timelines(pls, pls->timelines[pls->first_seq_no]->starttime + start_time_offset);
+            start_time_offset = get_segment_start_time_based_on_timeline(pls, 0xFFFFFFFF) - 60 * pls->fragment_timescale; // 60 seconds before end
+            num = calc_next_seg_no_from_timelines(pls, start_time_offset);
             if (num == -1)
                 num = pls->first_seq_no;
+            else
+                num += pls->first_seq_no;
+            av_log(NULL, AV_LOG_DEBUG, "calc_cur_seg_no num=%"PRId64", first_seq_no=%"PRId64"\n", num, pls->first_seq_no);
         } else if (pls->fragment_duration){
             if (pls->presentation_timeoffset) {
                 num = pls->presentation_timeoffset * pls->fragment_timescale / pls->fragment_duration;
@@ -1135,7 +1269,6 @@ static void move_segments(struct representation *rep_src, struct representation 
 
 static int refresh_manifest(AVFormatContext *s)
 {
-
     int ret = 0;
     DASHContext *c = s->priv_data;
 
@@ -1249,6 +1382,11 @@ static struct fragment *get_current_fragment(struct representation *pls)
     }
     if (seg) {
         char tmpfilename[MAX_URL_SIZE];
+        if (!pls->url_template) {
+            av_log(pls->parent, AV_LOG_ERROR, "Cannot get fragment, missing template URL\n");
+            av_free(seg);
+            return NULL;
+        }
 
         ff_dash_fill_tmpl_params(tmpfilename, sizeof(tmpfilename), pls->url_template, 0, pls->cur_seq_no, 0, get_segment_start_time_based_on_timeline(pls, pls->cur_seq_no));
         seg->url = av_strireplace(pls->url_template, pls->url_template, tmpfilename);
@@ -1388,6 +1526,10 @@ static int64_t seek_data(void *opaque, int64_t offset, int whence)
 {
     struct representation *v = opaque;
     if (v->n_fragments && !v->init_sec_data_len) {
+        if (whence & AVSEEK_SIZE) {
+            return (v->input && v->input->seek) ? v->input->seek(v->input->opaque, offset, AVSEEK_SIZE) : AVERROR(ENOSYS);
+        }
+
         return avio_seek(v->input, offset, whence);
     }
 
@@ -1447,9 +1589,11 @@ restart:
     if (ret > 0)
         goto end;
 
-    if (!v->is_restart_needed)
-        v->cur_seq_no++;
-    v->is_restart_needed = 1;
+    if (c->is_live || v->cur_seq_no < v->last_seq_no) {
+        if (!v->is_restart_needed)
+            v->cur_seq_no++;
+        v->is_restart_needed = 1;
+    }
 
 end:
     return ret;
@@ -1506,6 +1650,9 @@ static int reopen_demux_for_component(AVFormatContext *s, struct representation 
         ret = AVERROR(ENOMEM);
         goto fail;
     }
+    if (pls->drm_info) {
+        pls->ctx->opaque = &pls->drm_info;
+    }
 
     avio_ctx_buffer  = av_malloc(INITIAL_BUFFER_SIZE);
     if (!avio_ctx_buffer ) {
@@ -1516,10 +1663,11 @@ static int reopen_demux_for_component(AVFormatContext *s, struct representation 
     }
     if (c->is_live) {
         ffio_init_context(&pls->pb, avio_ctx_buffer , INITIAL_BUFFER_SIZE, 0, pls, read_data, NULL, NULL);
+        pls->pb.seekable = 0;
     } else {
         ffio_init_context(&pls->pb, avio_ctx_buffer , INITIAL_BUFFER_SIZE, 0, pls, read_data, NULL, seek_data);
+        pls->pb.seekable = AVIO_SEEKABLE_NORMAL;
     }
-    pls->pb.seekable = 0;
 
     if ((ret = ff_copy_whiteblacklists(pls->ctx, s)) < 0)
         goto fail;
@@ -1587,8 +1735,10 @@ static int dash_read_header(AVFormatContext *s)
 {
     void *u = (s->flags & AVFMT_FLAG_CUSTOM_IO) ? NULL : s->pb;
     DASHContext *c = s->priv_data;
+    char **drm_holder = s->opaque;
     int ret = 0;
     int stream_index = 0;
+    int has_notified = 0;
 
     c->interrupt_callback = &s->interrupt_callback;
     // if the URL context is good, read important options we must broker later
@@ -1612,10 +1762,28 @@ static int dash_read_header(AVFormatContext *s)
 
     /* Open the demuxer for curent video and current audio components if available */
     if (!ret && c->cur_video) {
+        if (drm_holder && (*drm_holder) && !c->cur_video->drm_info) {
+            c->cur_video->drm_info = av_mallocz(512);
+            if (!c->cur_video->drm_info) {
+                av_log(s, AV_LOG_ERROR, "cant mallocz cur_video drm_info\n");
+                ret = AVERROR(ENOMEM);
+                goto fail;
+            }
+        }
         ret = open_demux_for_component(s, c->cur_video);
         if (!ret) {
             c->cur_video->stream_index = stream_index;
             ++stream_index;
+            if (c->cur_video->drm_info) {
+                if ((c->index_drm_first || !strlen(c->cur_video->drm_info)) && c->cp_video && c->cp_video->completed) {
+                    sprintf(c->cur_video->drm_info, "video,%s,%s,%s", c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
+                }
+                has_notified = (c->index_drm_first && c->cp_video && c->cp_video->completed) ? 1 : 0;
+                if (!has_notified && strlen(c->cur_video->drm_info)) {
+                    sprintf(*drm_holder, "%s", c->cur_video->drm_info);
+                    ff_check_interrupt(&s->drm_update_callback);
+                }
+            }
         } else {
             free_representation(c->cur_video);
             c->cur_video = NULL;
@@ -1623,10 +1791,28 @@ static int dash_read_header(AVFormatContext *s)
     }
 
     if (!ret && c->cur_audio) {
+        if (drm_holder && (*drm_holder) && !c->cur_audio->drm_info) {
+            c->cur_audio->drm_info = av_mallocz(512);
+            if (!c->cur_audio->drm_info) {
+                av_log(s, AV_LOG_ERROR, "cant mallocz cur_audio drm_info\n");
+                ret = AVERROR(ENOMEM);
+                goto fail;
+            }
+        }
         ret = open_demux_for_component(s, c->cur_audio);
         if (!ret) {
             c->cur_audio->stream_index = stream_index;
             ++stream_index;
+            if (c->cur_audio->drm_info) {
+                if ((c->index_drm_first || !strlen(c->cur_audio->drm_info)) && c->cp_audio && c->cp_audio->completed) {
+                    sprintf(c->cur_audio->drm_info, "audio,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
+                }
+                has_notified = (c->index_drm_first && c->cp_video && c->cp_video->completed) ? 1 : 0;
+                if (!has_notified && strlen(c->cur_audio->drm_info)) {
+                    sprintf(*drm_holder, "%s", c->cur_audio->drm_info);
+                    ff_check_interrupt(&s->drm_update_callback);
+                }
+            }
         } else {
             free_representation(c->cur_audio);
             c->cur_audio = NULL;
@@ -1652,6 +1838,26 @@ static int dash_read_header(AVFormatContext *s)
         if (c->cur_audio) {
             av_program_add_stream_index(s, 0, c->cur_audio->stream_index);
         }
+    }
+
+    if (drm_holder && (*drm_holder)) {
+        char *drm_info = *drm_holder;
+        int has_audio_sub_drm_info = (c->cur_audio && c->cur_audio->drm_info && strlen(c->cur_audio->drm_info)) ? 1 : 0;
+        int has_video_sub_drm_info = (c->cur_video && c->cur_video->drm_info && strlen(c->cur_video->drm_info)) ? 1 : 0;
+        if (has_audio_sub_drm_info && has_video_sub_drm_info) {
+            sprintf(drm_info, "%s;%s", c->cur_audio->drm_info, c->cur_video->drm_info);
+        } else if (has_audio_sub_drm_info) {
+            sprintf(drm_info, "%s", c->cur_audio->drm_info);
+        } else if (has_video_sub_drm_info) {
+            sprintf(drm_info, "%s", c->cur_video->drm_info);
+        }
+        if (c->cur_audio && c->cur_audio->drm_info) {
+            av_freep(&c->cur_audio->drm_info);
+        }
+        if (c->cur_video && c->cur_video->drm_info) {
+            av_freep(&c->cur_video->drm_info);
+        }
+        av_log(s, AV_LOG_WARNING, "read contentprotection %s", drm_info);
     }
 
     return 0;
@@ -1715,6 +1921,12 @@ static int dash_close(AVFormatContext *s)
     av_freep(&c->user_agent);
     av_dict_free(&c->avio_opts);
     av_freep(&c->base_url);
+    if (c->cp_audio) {
+        free_contentprotection(c->cp_audio);
+    }
+    if (c->cp_video) {
+        free_contentprotection(c->cp_video);
+    }
     return 0;
 }
 
@@ -1824,6 +2036,8 @@ static const AVOption dash_options[] = {
         OFFSET(allowed_extensions), AV_OPT_TYPE_STRING,
         {.str = "aac,m4a,m4s,m4v,mov,mp4"},
         INT_MIN, INT_MAX, FLAGS},
+    {"index-drm-first", "use drm info parsed from mpd file first",
+        OFFSET(index_drm_first), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS},
     {NULL}
 };
 

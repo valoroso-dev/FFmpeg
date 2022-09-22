@@ -1607,6 +1607,16 @@ enum AVPacketSideDataType {
     AV_PKT_DATA_A53_CC,
 
     /**
+     * drm key info for every packet
+     */
+    AV_PKT_DATA_DRM_KEY,
+
+    /**
+     * drm init info when updated
+     */
+    AV_PKT_DATA_DRM_INIT_INFO,
+
+    /**
      * The number of side data elements (in fact a bit more than it).
      * This is not part of the public API/ABI in the sense that it may
      * change when new side data types are added.
@@ -1724,6 +1734,8 @@ typedef struct AVPacket {
  */
 #define AV_PKT_FLAG_TRUSTED   0x0008
 #define AV_PKT_FLAG_NEW_SEG 0x8000 ///< The packet is the first packet from a source in concat
+#define AV_PKT_FLAG_ENCRYPTED 0x10000 ///< The packet content is encrypted
+#define AV_PKT_FLAG_DRM_INIT_INFO 0x20000 ///< The packet contain new drm init info
 
 enum AVSideDataParamChangeFlags {
     AV_SIDE_DATA_PARAM_CHANGE_CHANNEL_COUNT  = 0x0001,

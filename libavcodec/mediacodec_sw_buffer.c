@@ -337,3 +337,14 @@ void ff_mediacodec_sw_buffer_copy_yuv420_packed_semi_planar_64x32Tile2m8ka(AVCod
         height -= QCOM_TILE_HEIGHT;
     }
 }
+
+void ff_mediacodec_sw_buffer_copy_audio(AVCodecContext *avctx,
+                                        MediaCodecDecContext *s,
+                                        uint8_t *data,
+                                        size_t size,
+                                        FFAMediaCodecBufferInfo *info,
+                                        AVFrame *frame) {
+    int per_sample_size = av_get_bytes_per_sample(frame->format);
+    int channel_count = frame->channels;
+    memcpy(frame->data[0], data, frame->nb_samples * per_sample_size * channel_count);
+}

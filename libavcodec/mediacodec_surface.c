@@ -54,3 +54,33 @@ int ff_mediacodec_surface_unref(void *surface, void *log_ctx)
 
     return 0;
 }
+
+void *ff_mediacodec_media_crypto_ref(void *crypto, void *log_ctx)
+{
+    JNIEnv *env = NULL;
+
+    void *reference = NULL;
+
+    env = ff_jni_get_env(log_ctx);
+    if (!env) {
+        return NULL;
+    }
+
+    reference = (*env)->NewGlobalRef(env, crypto);
+
+    return reference;
+}
+
+int ff_mediacodec_media_crypto_unref(void *crypto, void *log_ctx)
+{
+    JNIEnv *env = NULL;
+
+    env = ff_jni_get_env(log_ctx);
+    if (!env) {
+        return AVERROR_EXTERNAL;
+    }
+
+    (*env)->DeleteGlobalRef(env, crypto);
+
+    return 0;
+}
