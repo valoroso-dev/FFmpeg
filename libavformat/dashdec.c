@@ -123,6 +123,7 @@ struct contentprotection {
     char *scheme_id_uri;
     char *default_kid;
     char *cenc_pssh;
+    int completed;
 };
 
 typedef struct DASHContext {
@@ -154,6 +155,7 @@ typedef struct DASHContext {
 
     struct contentprotection *cp_video;
     struct contentprotection *cp_audio;
+    int index_drm_first;
 } DASHContext;
 
 static uint64_t get_current_time_in_sec(void)
@@ -353,6 +355,7 @@ static struct contentprotection* new_contentprotection(void)
     out->scheme_id_uri = av_strdup("unknown");
     out->default_kid = av_strdup("unknown");
     out->cenc_pssh = av_strdup("unknown");
+    out->completed = 0;
     av_log(NULL, AV_LOG_WARNING, "new contentprotection");
     return out;
 }
@@ -621,6 +624,8 @@ static int parse_manifest_contentprotection(AVFormatContext *s, struct contentpr
     char *scheme_type;
     char *default_kid;
     int has_get_valid_contentprotection = 0;
+    DASHContext *c = s->priv_data;
+    char **drm_holder = s->opaque;
 
     if (!con) {
         return AVERROR(ENOMEM);
@@ -667,10 +672,20 @@ static int parse_manifest_contentprotection(AVFormatContext *s, struct contentpr
                 }
                 con->cenc_pssh = av_strdup(text);
                 xmlFree(text);
+                con->completed = 1;
             }
             av_log(s, AV_LOG_WARNING, "parse manifest contentprotection %s %s %s %s",
                 con->scheme_type, con->scheme_id_uri, con->default_kid, con->cenc_pssh);
             has_get_valid_contentprotection = 1;
+            if (c->index_drm_first && con->completed && drm_holder && (*drm_holder)) {
+                if (type == AVMEDIA_TYPE_AUDIO) {
+                    sprintf(*drm_holder, "audio,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
+                    ff_check_interrupt(&s->drm_update_callback);
+                } else if (type == AVMEDIA_TYPE_VIDEO) {
+                    sprintf(*drm_holder, "video,%s,%s,%s", c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
+                    ff_check_interrupt(&s->drm_update_callback);
+                }
+            }
         }
     } else {
         av_log(s, AV_LOG_ERROR, "not support schemeIdUri: '%s'\n", scheme_id_uri);
@@ -1723,6 +1738,7 @@ static int dash_read_header(AVFormatContext *s)
     char **drm_holder = s->opaque;
     int ret = 0;
     int stream_index = 0;
+    int has_notified = 0;
 
     c->interrupt_callback = &s->interrupt_callback;
     // if the URL context is good, read important options we must broker later
@@ -1758,12 +1774,15 @@ static int dash_read_header(AVFormatContext *s)
         if (!ret) {
             c->cur_video->stream_index = stream_index;
             ++stream_index;
-            if (!strlen(c->cur_video->drm_info) && c->cp_video) {
-                sprintf(c->cur_video->drm_info, "video,%s,%s,%s", c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
-            }
-            if (c->cur_video->drm_info && strlen(c->cur_video->drm_info)) {
-                sprintf(*drm_holder, "%s", c->cur_video->drm_info);
-                ff_check_interrupt(&s->drm_update_callback);
+            if (c->cur_video->drm_info) {
+                if ((c->index_drm_first || !strlen(c->cur_video->drm_info)) && c->cp_video && c->cp_video->completed) {
+                    sprintf(c->cur_video->drm_info, "video,%s,%s,%s", c->cp_video->scheme_type, c->cp_video->scheme_id_uri, c->cp_video->cenc_pssh);
+                }
+                has_notified = (c->index_drm_first && c->cp_video && c->cp_video->completed) ? 1 : 0;
+                if (!has_notified && strlen(c->cur_video->drm_info)) {
+                    sprintf(*drm_holder, "%s", c->cur_video->drm_info);
+                    ff_check_interrupt(&s->drm_update_callback);
+                }
             }
         } else {
             free_representation(c->cur_video);
@@ -1784,12 +1803,15 @@ static int dash_read_header(AVFormatContext *s)
         if (!ret) {
             c->cur_audio->stream_index = stream_index;
             ++stream_index;
-            if (!strlen(c->cur_audio->drm_info) && c->cp_audio) {
-                sprintf(c->cur_audio->drm_info, "audio,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
-            }
-            if (c->cur_audio->drm_info && strlen(c->cur_audio->drm_info)) {
-                sprintf(*drm_holder, "%s", c->cur_audio->drm_info);
-                ff_check_interrupt(&s->drm_update_callback);
+            if (c->cur_audio->drm_info) {
+                if ((c->index_drm_first || !strlen(c->cur_audio->drm_info)) && c->cp_audio && c->cp_audio->completed) {
+                    sprintf(c->cur_audio->drm_info, "audio,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
+                }
+                has_notified = (c->index_drm_first && c->cp_video && c->cp_video->completed) ? 1 : 0;
+                if (!has_notified && strlen(c->cur_audio->drm_info)) {
+                    sprintf(*drm_holder, "%s", c->cur_audio->drm_info);
+                    ff_check_interrupt(&s->drm_update_callback);
+                }
             }
         } else {
             free_representation(c->cur_audio);
@@ -2014,6 +2036,8 @@ static const AVOption dash_options[] = {
         OFFSET(allowed_extensions), AV_OPT_TYPE_STRING,
         {.str = "aac,m4a,m4s,m4v,mov,mp4"},
         INT_MIN, INT_MAX, FLAGS},
+    {"index-drm-first", "use drm info parsed from mpd file first",
+        OFFSET(index_drm_first), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS},
     {NULL}
 };
 
