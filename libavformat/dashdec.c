@@ -1807,7 +1807,7 @@ static int dash_read_header(AVFormatContext *s)
                 if ((c->index_drm_first || !strlen(c->cur_audio->drm_info)) && c->cp_audio && c->cp_audio->completed) {
                     sprintf(c->cur_audio->drm_info, "audio,%s,%s,%s", c->cp_audio->scheme_type, c->cp_audio->scheme_id_uri, c->cp_audio->cenc_pssh);
                 }
-                has_notified = (c->index_drm_first && c->cp_video && c->cp_video->completed) ? 1 : 0;
+                has_notified = (c->index_drm_first && c->cp_audio && c->cp_audio->completed) ? 1 : 0;
                 if (!has_notified && strlen(c->cur_audio->drm_info)) {
                     sprintf(*drm_holder, "%s", c->cur_audio->drm_info);
                     ff_check_interrupt(&s->drm_update_callback);
