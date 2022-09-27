@@ -224,7 +224,7 @@ static MOVEncryptionInfo* check_and_get_encryption_info(MOVContext *c, MOVStream
         sc->cenc.enc_size = 1;
         return sc->cenc.enc_list;
     }
-    if (c->is_live) {
+    if (c->is_live || c->enable_seek_detect) {
         return sc->cenc.enc_list;
     }
 
@@ -299,7 +299,7 @@ static int64_t find_encryption_info_index(MOVEncryptionInfo *current, int64_t po
 static int64_t find_encryption_info(MOVContext *c, MOVStreamContext *sc, int64_t pos, MOVEncryptionInfo **out)
 {
     MOVEncryptionInfo *current;
-    if (c->is_live) {
+    if (c->is_live || c->enable_seek_detect) {
         *out = sc->cenc.enc_list;
         return find_encryption_info_index(*out, pos);
     }
