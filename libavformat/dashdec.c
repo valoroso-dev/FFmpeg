@@ -1666,7 +1666,7 @@ static int reopen_demux_for_component(AVFormatContext *s, struct representation 
         pls->pb.seekable = 0;
     } else {
         ffio_init_context(&pls->pb, avio_ctx_buffer , INITIAL_BUFFER_SIZE, 0, pls, read_data, NULL, seek_data);
-        pls->pb.seekable = AVIO_SEEKABLE_NORMAL;
+        pls->pb.seekable = pls->n_fragments == 1 ? AVIO_SEEKABLE_NORMAL : 0;
     }
 
     if ((ret = ff_copy_whiteblacklists(pls->ctx, s)) < 0)
@@ -1757,7 +1757,13 @@ static int dash_read_header(AVFormatContext *s)
     /* If this isn't a live stream, fill the total duration of the
      * stream. */
     if (!c->is_live) {
-        s->duration = (int64_t) c->media_presentation_duration * AV_TIME_BASE;
+        if (c->media_presentation_duration > 0) {
+            s->duration = (int64_t) c->media_presentation_duration * AV_TIME_BASE;
+        } else if (c->period_duration > 0) {
+            s->duration = (int64_t) c->period_duration * AV_TIME_BASE;
+        } else {
+            s->duration = 0;
+        }
     }
 
     /* Open the demuxer for curent video and current audio components if available */
