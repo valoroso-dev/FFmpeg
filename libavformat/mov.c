@@ -224,7 +224,7 @@ static MOVEncryptionInfo* check_and_get_encryption_info(MOVContext *c, MOVStream
         sc->cenc.enc_size = 1;
         return sc->cenc.enc_list;
     }
-    if (c->is_live) {
+    if (c->is_live || c->enable_seek_detect) {
         return sc->cenc.enc_list;
     }
 
@@ -299,7 +299,7 @@ static int64_t find_encryption_info_index(MOVEncryptionInfo *current, int64_t po
 static int64_t find_encryption_info(MOVContext *c, MOVStreamContext *sc, int64_t pos, MOVEncryptionInfo **out)
 {
     MOVEncryptionInfo *current;
-    if (c->is_live) {
+    if (c->is_live || c->enable_seek_detect) {
         *out = sc->cenc.enc_list;
         return find_encryption_info_index(*out, pos);
     }
@@ -5506,17 +5506,17 @@ static int mov_read_pssh(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     } else if (mostSigBits == 0x9A04F07998404286L && leastSigBits == 0xAB92E65BE0885F95L) {
         // playready
         // sc->drm_context->uuid = av_strdup("urn:uuid:9a04f079-9840-4286-ab92-e65be0885f95");
-        av_log(c->fc, AV_LOG_ERROR, "unsupport playready pssh uuid\n");
+        av_log(c->fc, AV_LOG_DEBUG, "unsupport playready pssh uuid\n");
         return 0;
     } else if (mostSigBits == 0xE2719D58A985B3C9L && leastSigBits == 0x781AB030AF78D30EL) {
         // clearkey
         // sc->drm_context->uuid = av_strdup("urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e");
-        av_log(c->fc, AV_LOG_ERROR, "unsupport clearkey pssh uuid\n");
+        av_log(c->fc, AV_LOG_DEBUG, "unsupport clearkey pssh uuid\n");
         return 0;
     } else if (mostSigBits == 0x1077EFECC0B24D02L && leastSigBits == 0xACE33C1E52E2FB4BL) {
         // common pssh uuid
         // sc->drm_context->uuid = av_strdup("urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b");
-        av_log(c->fc, AV_LOG_ERROR, "unsupport common pssh uuid\n");
+        av_log(c->fc, AV_LOG_DEBUG, "unsupport common pssh uuid\n");
         return 0;
     } else {
         av_log(c->fc, AV_LOG_ERROR, "unsupport unknown uuid\n");
