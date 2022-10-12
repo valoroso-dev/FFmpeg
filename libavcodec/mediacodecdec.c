@@ -317,6 +317,32 @@ static int aac_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
 }
 #endif
 
+#if CONFIG_MP2_MEDIACODEC_DECODER || CONFIG_MP3_MEDIACODEC_DECODER
+static int mpeg_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
+{
+    int ret = 0;
+
+    if (avctx->extradata) {
+        ff_AMediaFormat_setBuffer(format, "csd-0", avctx->extradata, avctx->extradata_size);
+    }
+
+    return ret;
+}
+#endif
+
+#if CONFIG_AC3_MEDIACODEC_DECODER
+static int ac3_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
+{
+    int ret = 0;
+
+    if (avctx->extradata) {
+        ff_AMediaFormat_setBuffer(format, "csd-0", avctx->extradata, avctx->extradata_size);
+    }
+
+    return ret;
+}
+#endif
+
 static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
 {
     int ret;
@@ -394,6 +420,33 @@ static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
         codec_mime = "audio/mp4a-latm";
 
         ret = aac_set_extradata(avctx, format);
+        if (ret < 0)
+            goto done;
+        break;
+#endif
+#if CONFIG_MP2_MEDIACODEC_DECODER
+    case AV_CODEC_ID_MP2:
+        codec_mime = "audio/mpeg-L2";
+
+        ret = mpeg_set_extradata(avctx, format);
+        if (ret < 0)
+            goto done;
+        break;
+#endif
+#if CONFIG_MP3_MEDIACODEC_DECODER
+    case AV_CODEC_ID_MP3:
+        codec_mime = "audio/mpeg";
+
+        ret = mpeg_set_extradata(avctx, format);
+        if (ret < 0)
+            goto done;
+        break;
+#endif
+#if CONFIG_AC3_MEDIACODEC_DECODER
+    case AV_CODEC_ID_AC3:
+        codec_mime = "audio/ac3";
+
+        ret = ac3_set_extradata(avctx, format);
         if (ret < 0)
             goto done;
         break;
@@ -667,6 +720,54 @@ AVCodec ff_aac_latm_mediacodec_decoder = {
     .long_name      = NULL_IF_CONFIG_SMALL("AAC LATM Android MediaCodec decoder"),
     .type           = AVMEDIA_TYPE_AUDIO,
     .id             = AV_CODEC_ID_AAC_LATM,
+    .priv_data_size = sizeof(MediaCodecH264DecContext),
+    .init           = mediacodec_decode_init,
+    .decode         = mediacodec_decode_frame,
+    .flush          = mediacodec_decode_flush,
+    .close          = mediacodec_decode_close,
+    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
+    .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS,
+};
+#endif
+
+#ifdef CONFIG_MP2_MEDIACODEC_DECODER
+AVCodec ff_mp2_mediacodec_decoder = {
+    .name           = "mp2_mediacodec",
+    .long_name      = NULL_IF_CONFIG_SMALL("MP2 Android MediaCodec decoder"),
+    .type           = AVMEDIA_TYPE_AUDIO,
+    .id             = AV_CODEC_ID_MP2,
+    .priv_data_size = sizeof(MediaCodecH264DecContext),
+    .init           = mediacodec_decode_init,
+    .decode         = mediacodec_decode_frame,
+    .flush          = mediacodec_decode_flush,
+    .close          = mediacodec_decode_close,
+    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
+    .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS,
+};
+#endif
+
+#ifdef CONFIG_MP3_MEDIACODEC_DECODER
+AVCodec ff_mp3_mediacodec_decoder = {
+    .name           = "mp3_mediacodec",
+    .long_name      = NULL_IF_CONFIG_SMALL("MP3 Android MediaCodec decoder"),
+    .type           = AVMEDIA_TYPE_AUDIO,
+    .id             = AV_CODEC_ID_MP3,
+    .priv_data_size = sizeof(MediaCodecH264DecContext),
+    .init           = mediacodec_decode_init,
+    .decode         = mediacodec_decode_frame,
+    .flush          = mediacodec_decode_flush,
+    .close          = mediacodec_decode_close,
+    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
+    .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS,
+};
+#endif
+
+#ifdef CONFIG_AC3_MEDIACODEC_DECODER
+AVCodec ff_ac3_mediacodec_decoder = {
+    .name           = "ac3_mediacodec",
+    .long_name      = NULL_IF_CONFIG_SMALL("AC3 Android MediaCodec decoder"),
+    .type           = AVMEDIA_TYPE_AUDIO,
+    .id             = AV_CODEC_ID_AC3,
     .priv_data_size = sizeof(MediaCodecH264DecContext),
     .init           = mediacodec_decode_init,
     .decode         = mediacodec_decode_frame,
