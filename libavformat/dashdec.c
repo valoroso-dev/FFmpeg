@@ -156,6 +156,7 @@ typedef struct DASHContext {
     struct contentprotection *cp_video;
     struct contentprotection *cp_audio;
     int index_drm_first;
+    int refresh_advance_manifest;
 } DASHContext;
 
 static uint64_t get_current_time_in_sec(void)
@@ -1245,7 +1246,8 @@ static void move_timelines(struct representation *rep_src, struct representation
         rep_dest->last_seq_no = calc_max_seg_no(rep_dest);
         rep_src->timelines = NULL;
         rep_src->n_timelines = 0;
-        rep_dest->cur_seq_no = rep_src->cur_seq_no;
+        // modified by gibbs to fix issue the download same segment for times
+        // rep_dest->cur_seq_no = rep_src->cur_seq_no;
     }
 }
 
@@ -1335,6 +1337,7 @@ static struct fragment *get_current_fragment(struct representation *pls)
     struct fragment *seg = NULL;
     struct fragment *seg_ptr = NULL;
     DASHContext *c = pls->parent->priv_data;
+    unsigned usleep_times = 0;
 
     while (( !ff_check_interrupt(c->interrupt_callback)&& pls->n_fragments > 0)) {
         if (pls->cur_seq_no < pls->n_fragments) {
@@ -1369,6 +1372,20 @@ static struct fragment *get_current_fragment(struct representation *pls)
             pls->cur_seq_no = calc_cur_seg_no(pls->parent, pls);
         } else if (pls->cur_seq_no > max_seq_no) {
             av_log(pls->parent, AV_LOG_VERBOSE, "new fragment: min[%"PRId64"] max[%"PRId64"], playlist %d\n", min_seq_no, max_seq_no, (int)pls->rep_idx);
+            while (c->refresh_advance_manifest && (!ff_check_interrupt(c->interrupt_callback))) {
+                if (usleep_times > 0) {
+                    av_usleep(10*1000);
+                    usleep_times--;
+                    continue;
+                }
+                refresh_manifest(pls->parent);
+                if (pls->cur_seq_no > calc_max_seg_no(pls)) {
+                    usleep_times = 200;
+                } else {
+                    av_log(pls->parent, AV_LOG_VERBOSE, "new fragment: refresh finish cur[%"PRId64"]\n", pls->cur_seq_no);
+                    break;
+                }
+            }
         }
         seg = av_mallocz(sizeof(struct fragment));
         if (!seg) {
@@ -2044,6 +2061,8 @@ static const AVOption dash_options[] = {
         INT_MIN, INT_MAX, FLAGS},
     {"index-drm-first", "use drm info parsed from mpd file first",
         OFFSET(index_drm_first), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS},
+    {"refresh-advance-manifest", "refresh manifest before download the advance segment",
+        OFFSET(refresh_advance_manifest), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, FLAGS},
     {NULL}
 };
 
