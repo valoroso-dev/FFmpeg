@@ -187,14 +187,17 @@ static MOVEncryptionInfo* new_encryption_info(MOVContext *c)
         return NULL;
     }
 
+    enc_info->auxiliary_info = NULL;
+    enc_info->auxiliary_info_sizes = NULL;
+    enc_info->next = NULL;
     enc_info->moof_offset = frag->moof_offset;
     enc_info->sample_count = frag->sample_count;
     enc_info->sample_pos = av_mallocz_array(enc_info->sample_count, sizeof(*enc_info->sample_pos));
     if (!enc_info->sample_pos) {
         av_log(c->fc, AV_LOG_ERROR, "fail to create MOVEncryptionInfo's sample_pos!\n");
+        av_free(enc_info);
         return NULL;
     }
-    enc_info->next = NULL;
 
     av_log(c->fc, AV_LOG_DEBUG, "new_encryption_info moof_offset:%"PRId64", sample_count:%d\n",
         enc_info->moof_offset, enc_info->sample_count);
@@ -319,8 +322,12 @@ static int64_t find_encryption_info(MOVContext *c, MOVStreamContext *sc, int64_t
 
 static int free_encryption_info_list(MOVStreamContext *sc)
 {
-    MOVEncryptionInfo *current = sc->cenc.enc_list;
+    MOVEncryptionInfo *current;
     MOVEncryptionInfo *next;
+    if (sc->cenc.enc_list == NULL) {
+        return 0;
+    }
+    current = sc->cenc.enc_list;
     while (current)
     {
         next = current->next;
@@ -328,6 +335,7 @@ static int free_encryption_info_list(MOVStreamContext *sc)
         sc->cenc.enc_size--;
         current = next;
     }
+    sc->cenc.enc_list = NULL;
     av_log(NULL, AV_LOG_DEBUG, "free_encryption_info_list enc_size=%zu\n", sc->cenc.enc_size);
     return 0;
 }
@@ -4482,7 +4490,7 @@ static int mov_read_trun(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     AVStream *st = NULL;
     MOVStreamContext *sc;
     MOVStts *ctts_data;
-    MOVEncryptionInfo* enc_info;
+    MOVEncryptionInfo* enc_info = NULL;
     uint64_t offset;
     int64_t dts;
     int data_offset = 0;
@@ -4508,10 +4516,22 @@ static int mov_read_trun(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     av_log(c->fc, AV_LOG_TRACE, "flags 0x%x entries %u\n", flags, entries);
 
     frag->sample_count = entries;
-    enc_info = default_check_and_get_encryption_info(c);
-    if (!enc_info) {
-        av_log(c->fc, AV_LOG_ERROR, "default nb_streams:%u is invalid\n", c->fc->nb_streams);
-        return AVERROR_INVALIDDATA;
+    if (sc->drm_context) {
+        enc_info = default_check_and_get_encryption_info(c);
+        if (!enc_info) {
+            av_log(c->fc, AV_LOG_ERROR, "default nb_streams:%u is invalid\n", c->fc->nb_streams);
+            return AVERROR_INVALIDDATA;
+        }
+        if (enc_info->sample_count != entries) {
+            av_free(enc_info->sample_pos);
+            enc_info->sample_pos = av_mallocz_array(entries, sizeof(*enc_info->sample_pos));
+            if (!enc_info->sample_pos) {
+                av_log(c->fc, AV_LOG_ERROR, "fail to realloc MOVEncryptionInfo's sample_pos!\n");
+                return AVERROR(ENOMEM);
+            }
+            av_log(c->fc, AV_LOG_DEBUG, "realloc sample_pos size from %u to %u\n", enc_info->sample_count, entries);
+            enc_info->sample_count = entries;
+        }
     }
 
     if ((uint64_t)entries+sc->ctts_count >= UINT_MAX/sizeof(*sc->ctts_data))
@@ -4570,7 +4590,8 @@ static int mov_read_trun(MOVContext *c, AVIOContext *pb, MOVAtom atom)
             distance = 0;
         ctts_index = av_add_index_entry(st, offset, dts, sample_size, distance,
                                         keyframe ? AVINDEX_KEYFRAME : 0);
-        enc_info->sample_pos[i] = offset;
+        if (enc_info)
+            enc_info->sample_pos[i] = offset;
         if (ctts_index >= 0 && old_nb_index_entries < st->nb_index_entries) {
             unsigned int size_needed = st->nb_index_entries * sizeof(*sc->ctts_data);
             unsigned int request_size = size_needed > sc->ctts_allocated_size ?
