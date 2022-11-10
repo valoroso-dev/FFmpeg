@@ -7236,9 +7236,22 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
     if (st->discard != AVDISCARD_ALL) {
         int64_t ret64 = avio_seek(sc->pb, sample->pos, SEEK_SET);
         if (ret64 != sample->pos) {
+            int reach_max_retry = 0;
+            if (mov->max_retry_times > 0) {
+                if (sc->cur_retry_pos == sample->pos) {
+                    sc->cur_retry_times++;
+                } else {
+                    sc->cur_retry_pos = sample->pos;
+                    sc->cur_retry_times = 1;
+                }
+                if (sc->cur_retry_times >= mov->max_retry_times) {
+                    reach_max_retry = 1;
+                    av_log(mov->fc, AV_LOG_ERROR, "reach max retry time, drop pkt 0x%"PRIx64".\n", sample->pos);
+                }
+            }
             av_log(mov->fc, AV_LOG_ERROR, "stream %d, offset 0x%"PRIx64": partial file\n",
                    sc->ffindex, sample->pos);
-            if (should_retry(sc->pb, ret64)) {
+            if (should_retry(sc->pb, ret64) && !reach_max_retry) {
                 mov_current_sample_dec(sc);
             }
             return AVERROR_INVALIDDATA;
@@ -7540,6 +7553,8 @@ static const AVOption mov_options[] = {
         {.i64 = 0}, 0, 1, FLAGS },
     { "mov_enable_seek_detect", "enable seek detect support.", OFFSET(enable_seek_detect), AV_OPT_TYPE_BOOL,
         {.i64 = 0}, 0, 1, FLAGS },
+    { "max_retry_times", "max retry times when io error.", OFFSET(max_retry_times), AV_OPT_TYPE_INT,
+        {.i64 = -1}, -1, INT_MAX, FLAGS },
 
     { NULL },
 };
