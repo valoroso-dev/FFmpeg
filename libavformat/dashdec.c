@@ -157,6 +157,7 @@ typedef struct DASHContext {
     struct contentprotection *cp_audio;
     int index_drm_first;
     int refresh_advance_manifest;
+    int prefer_period_index;
 } DASHContext;
 
 static uint64_t get_current_time_in_sec(void)
@@ -1018,6 +1019,8 @@ static int parse_manifest(AVFormatContext *s, const char *url, AVIOContext *in)
     uint32_t perdiod_start_sec = 0;
     int32_t audio_rep_idx = 0;
     int32_t video_rep_idx = 0;
+    int cur_period_idx = 0;
+    int period_need_update = 0;
 
     if (!in) {
         close_in = 1;
@@ -1122,7 +1125,12 @@ static int parse_manifest(AVFormatContext *s, const char *url, AVIOContext *in)
                     attr = attr->next;
                     xmlFree(val);
                 }
-                if ((perdiod_duration_sec) >= (c->period_duration)) {
+                if (c->prefer_period_index > 0) {
+                    period_need_update = (c->prefer_period_index == cur_period_idx++) ? 0 : 1;
+                } else {
+                    period_need_update = (perdiod_duration_sec) >= (c->period_duration);
+                }
+                if (period_need_update) {
                     period_node = node;
                     c->period_duration = perdiod_duration_sec;
                     c->period_start = perdiod_start_sec;
@@ -1131,6 +1139,10 @@ static int parse_manifest(AVFormatContext *s, const char *url, AVIOContext *in)
                 }
             }
             node = xmlNextElementSibling(node);
+        }
+        if (c->prefer_period_index > 0 && cur_period_idx > 1) {
+            av_log(s, AV_LOG_INFO, "select the period index %d\n", c->prefer_period_index);
+            av_dict_set_int(&s->metadata, "IJK-PLAYLIST-INFO", cur_period_idx * 10000 + c->prefer_period_index, 0);
         }
         if (!period_node) {
             av_log(s, AV_LOG_ERROR, "Unable to parse '%s' - missing Period node\n", url);
@@ -2063,6 +2075,8 @@ static const AVOption dash_options[] = {
         OFFSET(index_drm_first), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS},
     {"refresh-advance-manifest", "refresh manifest before download the advance segment",
         OFFSET(refresh_advance_manifest), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, FLAGS},
+    {"prefer-period-index", "select the period equal the index",
+        OFFSET(prefer_period_index), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, FLAGS},
     {NULL}
 };
 
