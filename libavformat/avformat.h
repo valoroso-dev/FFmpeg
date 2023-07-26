@@ -1932,7 +1932,9 @@ typedef struct AVFormatContext {
      */
     int max_streams;
 
+    // custom properties
     int live_quick_start;
+    void* owner;
 } AVFormatContext;
 
 #if FF_API_FORMAT_GET_SET
