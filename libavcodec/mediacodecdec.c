@@ -36,6 +36,7 @@
 #include "hevc_parse.h"
 #include "hwaccel.h"
 #include "internal.h"
+#include "mediacodec.h"
 #include "mediacodec_wrapper.h"
 #include "mediacodecdec_common.h"
 
@@ -284,6 +285,51 @@ static int common_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
 }
 #endif
 
+#if CONFIG_AAC_MEDIACODEC_DECODER || CONFIG_AAC_LATM_MEDIACODEC_DECODER
+static int aac_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
+{
+    int ret = 0;
+
+    if (avctx->extradata) {
+        ff_AMediaFormat_setBuffer(format, "csd-0", avctx->extradata, avctx->extradata_size);
+    } else {
+        av_log(avctx, AV_LOG_WARNING, "%s: extradata is null\n", __func__);
+    }
+
+    return ret;
+}
+#endif
+
+#if CONFIG_MP2_MEDIACODEC_DECODER || CONFIG_MP3_MEDIACODEC_DECODER
+static int mpeg_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
+{
+    int ret = 0;
+
+    if (avctx->extradata) {
+        ff_AMediaFormat_setBuffer(format, "csd-0", avctx->extradata, avctx->extradata_size);
+    } else {
+        av_log(avctx, AV_LOG_WARNING, "%s: extradata is null\n", __func__);
+    }
+
+    return ret;
+}
+#endif
+
+#if CONFIG_AC3_MEDIACODEC_DECODER
+static int ac3_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
+{
+    int ret = 0;
+
+    if (avctx->extradata) {
+        ff_AMediaFormat_setBuffer(format, "csd-0", avctx->extradata, avctx->extradata_size);
+    } else {
+        av_log(avctx, AV_LOG_WARNING, "%s: extradata is null\n", __func__);
+    }
+
+    return ret;
+}
+#endif
+
 static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
 {
     int ret;
@@ -355,6 +401,43 @@ static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
             goto done;
         break;
 #endif
+#if CONFIG_AAC_MEDIACODEC_DECODER || CONFIG_AAC_LATM_MEDIACODEC_DECODER
+    case AV_CODEC_ID_AAC:
+    case AV_CODEC_ID_AAC_LATM:
+        codec_mime = "audio/mp4a-latm";
+
+        ret = aac_set_extradata(avctx, format);
+        if (ret < 0)
+            goto done;
+        break;
+#endif
+#if CONFIG_MP2_MEDIACODEC_DECODER
+    case AV_CODEC_ID_MP2:
+        codec_mime = "audio/mpeg-L2";
+
+        ret = mpeg_set_extradata(avctx, format);
+        if (ret < 0)
+            goto done;
+        break;
+#endif
+#if CONFIG_MP3_MEDIACODEC_DECODER
+    case AV_CODEC_ID_MP3:
+        codec_mime = "audio/mpeg";
+
+        ret = mpeg_set_extradata(avctx, format);
+        if (ret < 0)
+            goto done;
+        break;
+#endif
+#if CONFIG_AC3_MEDIACODEC_DECODER
+    case AV_CODEC_ID_AC3:
+        codec_mime = "audio/ac3";
+
+        ret = ac3_set_extradata(avctx, format);
+        if (ret < 0)
+            goto done;
+        break;
+#endif
     default:
         av_assert0(0);
     }
@@ -362,6 +445,9 @@ static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
     ff_AMediaFormat_setString(format, "mime", codec_mime);
     ff_AMediaFormat_setInt32(format, "width", avctx->width);
     ff_AMediaFormat_setInt32(format, "height", avctx->height);
+    ff_AMediaFormat_setInt32(format, "sample-rate", avctx->sample_rate);
+    ff_AMediaFormat_setInt32(format, "channel-count", avctx->channels);
+    // ff_AMediaFormat_setInt32(format, "pcm-encoding", /* ENCODING_PCM_16BIT */ 2);
 
     s->ctx = av_mallocz(sizeof(*s->ctx));
     if (!s->ctx) {
@@ -527,6 +613,26 @@ AVCodec ff_##short_name##_mediacodec_decoder = {                                
     .wrapper_name   = "mediacodec",                                                            \
 };                                                                                             \
 
+#define DECLARE_MEDIACODEC_ADEC(short_name, full_name, codec_id, bsf)                          \
+DECLARE_MEDIACODEC_VCLASS(short_name)                                                          \
+AVCodec ff_##short_name##_mediacodec_decoder = {                                               \
+    .name           = #short_name "_mediacodec",                                               \
+    .long_name      = NULL_IF_CONFIG_SMALL(full_name " Android MediaCodec decoder"),           \
+    .type           = AVMEDIA_TYPE_AUDIO,                                                      \
+    .id             = codec_id,                                                                \
+    .priv_class     = &ff_##short_name##_mediacodec_dec_class,                                 \
+    .priv_data_size = sizeof(MediaCodecH264DecContext),                                        \
+    .init           = mediacodec_decode_init,                                                  \
+    .receive_frame  = mediacodec_receive_frame,                                                \
+    .flush          = mediacodec_decode_flush,                                                 \
+    .close          = mediacodec_decode_close,                                                 \
+    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING | AV_CODEC_CAP_HARDWARE, \
+    .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS,                                               \
+    .bsfs           = bsf,                                                                     \
+    .hw_configs     = mediacodec_hw_configs,                                                   \
+    .wrapper_name   = "mediacodec",                                                            \
+};                                                                                             \
+
 #if CONFIG_H264_MEDIACODEC_DECODER
 DECLARE_MEDIACODEC_VDEC(h264, "H.264", AV_CODEC_ID_H264, "h264_mp4toannexb")
 #endif
@@ -549,4 +655,24 @@ DECLARE_MEDIACODEC_VDEC(vp8, "VP8", AV_CODEC_ID_VP8, NULL)
 
 #if CONFIG_VP9_MEDIACODEC_DECODER
 DECLARE_MEDIACODEC_VDEC(vp9, "VP9", AV_CODEC_ID_VP9, NULL)
+#endif
+
+#ifdef CONFIG_AAC_MEDIACODEC_DECODER
+DECLARE_MEDIACODEC_ADEC(aac, "AAC", AV_CODEC_ID_AAC, NULL)
+#endif
+
+#ifdef CONFIG_AAC_LATM_MEDIACODEC_DECODER
+DECLARE_MEDIACODEC_ADEC(aac_latm, "AAC_LATM", AV_CODEC_ID_AAC_LATM, NULL)
+#endif
+
+#ifdef CONFIG_MP2_MEDIACODEC_DECODER
+DECLARE_MEDIACODEC_ADEC(mp2, "MP2", AV_CODEC_ID_MP2, NULL)
+#endif
+
+#ifdef CONFIG_MP3_MEDIACODEC_DECODER
+DECLARE_MEDIACODEC_ADEC(mp3, "MP3", AV_CODEC_ID_MP2, NULL)
+#endif
+
+#ifdef CONFIG_AC3_MEDIACODEC_DECODER
+DECLARE_MEDIACODEC_ADEC(ac3, "AC3", AV_CODEC_ID_AC3, NULL)
 #endif

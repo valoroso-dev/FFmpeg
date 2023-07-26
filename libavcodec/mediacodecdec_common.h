@@ -44,8 +44,10 @@ typedef struct MediaCodecDecContext {
 
     FFAMediaCodec *codec;
     FFAMediaFormat *format;
+    FFAMediaCodecCryptoInfo *crypto_info;
 
     void *surface;
+    void *crypto;
 
     int started;
     int draining;
@@ -63,6 +65,10 @@ typedef struct MediaCodecDecContext {
     int crop_right;
     int display_width;
     int display_height;
+
+    int sample_rate;
+    int channel_count;
+    int pcm_encoding;
 
     uint64_t output_buffer_count;
 

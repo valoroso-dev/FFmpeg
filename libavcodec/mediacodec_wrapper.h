@@ -78,6 +78,19 @@ void ff_AMediaFormat_setBuffer(FFAMediaFormat* format, const char* name, void* d
 
 struct FFAMediaCodec;
 typedef struct FFAMediaCodec FFAMediaCodec;
+
+struct FFAMediaCodecCryptoInfo {
+    int8_t *iv;
+    int32_t ivLength;
+    int8_t *key;
+    int32_t keyLength;
+    int32_t mode;
+    int32_t *numBytesOfClearData;
+    int32_t *numBytesOfEncryptedData;
+    uint32_t numSubSamples;
+    uint8_t encryptBlocks;
+    uint8_t skipBlocks;
+};
 typedef struct FFAMediaCodecCryptoInfo FFAMediaCodecCryptoInfo;
 
 struct FFAMediaCodecBufferInfo {
@@ -105,6 +118,7 @@ uint8_t* ff_AMediaCodec_getOutputBuffer(FFAMediaCodec* codec, size_t idx, size_t
 
 ssize_t ff_AMediaCodec_dequeueInputBuffer(FFAMediaCodec* codec, int64_t timeoutUs);
 int ff_AMediaCodec_queueInputBuffer(FFAMediaCodec* codec, size_t idx, off_t offset, size_t size, uint64_t time, uint32_t flags);
+int ff_AMediaCodec_queueSecureInputBuffer(FFAMediaCodec* codec, size_t idx, off_t offset, FFAMediaCodecCryptoInfo *info, uint64_t time, uint32_t flags);
 
 ssize_t ff_AMediaCodec_dequeueOutputBuffer(FFAMediaCodec* codec, FFAMediaCodecBufferInfo *info, int64_t timeoutUs);
 FFAMediaFormat* ff_AMediaCodec_getOutputFormat(FFAMediaCodec* codec);
@@ -123,5 +137,9 @@ int ff_AMediaCodec_getBufferFlagKeyFrame(FFAMediaCodec *codec);
 int ff_AMediaCodec_getConfigureFlagEncode(FFAMediaCodec *codec);
 
 int ff_AMediaCodec_cleanOutputBuffers(FFAMediaCodec *codec);
+
+FFAMediaCodecCryptoInfo* ff_AMediaCodec_CryptoInfo_new(void);
+int ff_AMediaCodec_CryptoInfo_delete(FFAMediaCodecCryptoInfo *crypto_info);
+int ff_AMediaCodec_CryptoInfo_fill(uint8_t *key_data, uint32_t key_data_size, FFAMediaCodecCryptoInfo **crypto_info, uint32_t av_data_len);
 
 #endif /* AVCODEC_MEDIACODEC_WRAPPER_H */

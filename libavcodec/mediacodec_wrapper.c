@@ -196,6 +196,7 @@ struct JNIAMediaCodecFields {
 
     jmethodID dequeue_input_buffer_id;
     jmethodID queue_input_buffer_id;
+    jmethodID queue_secure_input_buffer_id;
     jmethodID get_input_buffer_id;
     jmethodID get_input_buffers_id;
 
@@ -214,6 +215,23 @@ struct JNIAMediaCodecFields {
     jfieldID presentation_time_us_id;
     jfieldID size_id;
 
+    jclass cryptoinfo_class;
+
+    jfieldID field_iv;
+    jfieldID field_key;
+    jfieldID field_mode;
+    jfieldID field_numBytesOfClearData;
+    jfieldID field_numBytesOfEncryptedData;
+    jfieldID field_numSubSamples;
+    jmethodID constructor_CryptoInfo;
+    jmethodID method_CryptoInfo_set;
+    jmethodID method_CryptoInfo_toString;
+    jmethodID method_CryptoInfo_setPattern;
+
+    jclass cryptoinfo_pattern_class;
+
+    jmethodID constructor_cryptoinfo_Pattern;
+    jmethodID method_cryptoinfo_Pattern_set;
 };
 
 static const struct FFJniField jni_amediacodec_mapping[] = {
@@ -245,6 +263,7 @@ static const struct FFJniField jni_amediacodec_mapping[] = {
 
         { "android/media/MediaCodec", "dequeueInputBuffer", "(J)I", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, dequeue_input_buffer_id), 1 },
         { "android/media/MediaCodec", "queueInputBuffer", "(IIIJI)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, queue_input_buffer_id), 1 },
+        { "android/media/MediaCodec", "queueSecureInputBuffer", "(IILandroid/media/MediaCodec$CryptoInfo;JI)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, queue_secure_input_buffer_id), 1 },
         { "android/media/MediaCodec", "getInputBuffer", "(I)Ljava/nio/ByteBuffer;", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, get_input_buffer_id), 0 },
         { "android/media/MediaCodec", "getInputBuffers", "()[Ljava/nio/ByteBuffer;", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, get_input_buffers_id), 1 },
 
@@ -261,6 +280,24 @@ static const struct FFJniField jni_amediacodec_mapping[] = {
         { "android/media/MediaCodec.BufferInfo", "offset", "I", FF_JNI_FIELD, offsetof(struct JNIAMediaCodecFields, offset_id), 1 },
         { "android/media/MediaCodec.BufferInfo", "presentationTimeUs", "J", FF_JNI_FIELD, offsetof(struct JNIAMediaCodecFields, presentation_time_us_id), 1 },
         { "android/media/MediaCodec.BufferInfo", "size", "I", FF_JNI_FIELD, offsetof(struct JNIAMediaCodecFields, size_id), 1 },
+
+    { "android/media/MediaCodec$CryptoInfo", NULL, NULL, FF_JNI_CLASS, offsetof(struct JNIAMediaCodecFields, cryptoinfo_class), 1 },
+
+        { "android/media/MediaCodec.CryptoInfo", "iv", "[B", FF_JNI_FIELD, offsetof(struct JNIAMediaCodecFields, field_iv), 1 },
+        { "android/media/MediaCodec.CryptoInfo", "key", "[B", FF_JNI_FIELD, offsetof(struct JNIAMediaCodecFields, field_key), 1 },
+        { "android/media/MediaCodec.CryptoInfo", "mode", "I", FF_JNI_FIELD, offsetof(struct JNIAMediaCodecFields, field_mode), 1 },
+        { "android/media/MediaCodec.CryptoInfo", "numBytesOfClearData", "[I", FF_JNI_FIELD, offsetof(struct JNIAMediaCodecFields, field_numBytesOfClearData), 1 },
+        { "android/media/MediaCodec.CryptoInfo", "numBytesOfEncryptedData", "[I", FF_JNI_FIELD, offsetof(struct JNIAMediaCodecFields, field_numBytesOfEncryptedData), 1 },
+        { "android/media/MediaCodec.CryptoInfo", "numSubSamples", "I", FF_JNI_FIELD, offsetof(struct JNIAMediaCodecFields, field_numSubSamples), 1 },
+        { "android/media/MediaCodec.CryptoInfo", "<init>", "()V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, constructor_CryptoInfo), 1 },
+        { "android/media/MediaCodec.CryptoInfo", "set", "(I[I[I[B[BI)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_CryptoInfo_set), 1 },
+        { "android/media/MediaCodec.CryptoInfo", "toString", "()Ljava/lang/String;", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_CryptoInfo_toString), 1 },
+        { "android/media/MediaCodec.CryptoInfo.Pattern", "setPattern", "(Landroid/media/MediaCodec$CryptoInfo$Pattern;)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_CryptoInfo_setPattern), 0 },
+
+    { "android/media/MediaCodec$CryptoInfo$Pattern", NULL, NULL, FF_JNI_CLASS, offsetof(struct JNIAMediaCodecFields, cryptoinfo_pattern_class), 0 },
+
+        { "android/media/MediaCodec.CryptoInfo.Pattern", "<init>", "(II)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, constructor_cryptoinfo_Pattern), 0 },
+        { "android/media/MediaCodec.CryptoInfo.Pattern", "set", "(II)V", FF_JNI_METHOD, offsetof(struct JNIAMediaCodecFields, method_cryptoinfo_Pattern_set), 0 },
 
     { NULL }
 };
@@ -471,8 +508,8 @@ char *ff_AMediaCodecList_getCodecNameByType(const char *mime, int profile, int e
 
                 /* Skip software decoders */
                 if (
-                    strstr(name, "OMX.google") ||
-                    strstr(name, "OMX.ffmpeg") ||
+                    (strstr(name, "OMX.google") && strstr(mime, "video")) ||
+                    (strstr(name, "OMX.ffmpeg") && strstr(mime, "video")) ||
                     (strstr(name, "OMX.SEC") && strstr(name, ".sw.")) ||
                     !strcmp(name, "OMX.qcom.video.decoder.hevcswvdec")) {
                     av_freep(&name);
@@ -1347,7 +1384,8 @@ int ff_AMediaCodec_configure(FFAMediaCodec* codec, const FFAMediaFormat* format,
 
     JNI_GET_ENV_OR_RETURN(env, codec, AVERROR_EXTERNAL);
 
-    (*env)->CallVoidMethod(env, codec->object, codec->jfields.configure_id, format->object, surface, NULL, flags);
+    av_log(NULL, AV_LOG_INFO, "ff_AMediaCodec_configure surface:%p, crypto:%p", surface, crypto);
+    (*env)->CallVoidMethod(env, codec->object, codec->jfields.configure_id, format->object, surface, crypto, flags);
     if (ff_jni_exception_check(env, 1, codec) < 0) {
         ret = AVERROR_EXTERNAL;
         goto fail;
@@ -1467,6 +1505,74 @@ int ff_AMediaCodec_queueInputBuffer(FFAMediaCodec* codec, size_t idx, off_t offs
     JNI_GET_ENV_OR_RETURN(env, codec, AVERROR_EXTERNAL);
 
     (*env)->CallVoidMethod(env, codec->object, codec->jfields.queue_input_buffer_id, (jint)idx, (jint)offset, (jint)size, time, flags);
+    if ((ret = ff_jni_exception_check(env, 1, codec)) < 0) {
+        ret = AVERROR_EXTERNAL;
+        goto fail;
+    }
+
+fail:
+    return ret;
+}
+
+int ff_AMediaCodec_queueSecureInputBuffer(FFAMediaCodec* codec, size_t idx, off_t offset, FFAMediaCodecCryptoInfo *info, uint64_t time, uint32_t flags)
+{
+    int ret = 0;
+    JNIEnv *env = NULL;
+
+    jobject crypto_info = NULL;
+    jobject crypto_pattern= NULL;
+
+    jintArray numBytesOfClearData = NULL;
+    jintArray numBytesOfEncryptedData = NULL;
+    jbyteArray iv = NULL;
+    jbyteArray key = NULL;
+    jstring cryptoInfoString = NULL;
+    const char* c_str;
+
+    JNI_GET_ENV_OR_RETURN(env, codec, AVERROR_EXTERNAL);
+
+    crypto_info = (*env)->NewObject(env, codec->jfields.cryptoinfo_class, codec->jfields.constructor_CryptoInfo);
+    if (ff_jni_exception_check(env, 1, codec) < 0) {
+        ret = AVERROR_EXTERNAL;
+        goto fail;
+    }
+
+    numBytesOfClearData = (*env)->NewIntArray(env, info->numSubSamples);
+    (*env)->SetIntArrayRegion(env, numBytesOfClearData, 0, info->numSubSamples, info->numBytesOfClearData);
+    numBytesOfEncryptedData = (*env)->NewIntArray(env, info->numSubSamples);
+    (*env)->SetIntArrayRegion(env, numBytesOfEncryptedData, 0, info->numSubSamples, info->numBytesOfEncryptedData);
+    iv = (*env)->NewByteArray(env, info->ivLength);
+    (*env)->SetByteArrayRegion(env, iv, 0, info->ivLength, info->iv);
+    key = (*env)->NewByteArray(env, info->keyLength);
+    (*env)->SetByteArrayRegion(env, key, 0, info->keyLength, info->key);
+    (*env)->CallVoidMethod(env, crypto_info, codec->jfields.method_CryptoInfo_set, info->numSubSamples, numBytesOfClearData, numBytesOfEncryptedData, key, iv, info->mode);
+
+    if (/*J4A_GetSystemAndroidApiLevel(env) >= 24 && */(info->encryptBlocks || info->skipBlocks)) {
+        crypto_pattern = (*env)->NewObject(env, codec->jfields.cryptoinfo_pattern_class, codec->jfields.constructor_cryptoinfo_Pattern,
+            info->encryptBlocks, info->skipBlocks);
+        if (ff_jni_exception_check(env, 1, codec) < 0) {
+            ret = AVERROR_EXTERNAL;
+            goto fail;
+        }
+        (*env)->CallVoidMethod(env, crypto_info, codec->jfields.method_CryptoInfo_setPattern, crypto_pattern);
+    }
+
+    if (av_log_get_level() <= AV_LOG_DEBUG) {
+        cryptoInfoString = (*env)->CallObjectMethod(env, crypto_info, codec->jfields.method_CryptoInfo_toString);
+        c_str = (*env)->GetStringUTFChars(env, cryptoInfoString, NULL);
+        av_log(NULL, AV_LOG_DEBUG, "ff_AMediaCodec_queueSecureInputBuffer cryptoInfoString: '%s'", c_str);
+        (*env)->ReleaseStringUTFChars(env, cryptoInfoString, c_str);
+        (*env)->DeleteLocalRef(env, cryptoInfoString);
+    }
+
+    (*env)->CallVoidMethod(env, codec->object, codec->jfields.queue_secure_input_buffer_id, (jint)idx, (jint)offset, crypto_info, time, flags);
+
+    (*env)->DeleteLocalRef(env, numBytesOfClearData);
+    (*env)->DeleteLocalRef(env, numBytesOfEncryptedData);
+    (*env)->DeleteLocalRef(env, iv);
+    (*env)->DeleteLocalRef(env, key);
+    (*env)->DeleteLocalRef(env, crypto_pattern);
+    (*env)->DeleteLocalRef(env, crypto_info);
     if ((ret = ff_jni_exception_check(env, 1, codec)) < 0) {
         ret = AVERROR_EXTERNAL;
         goto fail;
@@ -1686,4 +1792,76 @@ int ff_AMediaCodec_cleanOutputBuffers(FFAMediaCodec *codec)
 
 fail:
     return ret;
+}
+
+FFAMediaCodecCryptoInfo* ff_AMediaCodec_CryptoInfo_new()
+{
+    FFAMediaCodecCryptoInfo *crypto_info;
+    crypto_info = av_mallocz(sizeof(FFAMediaCodecCryptoInfo));
+    crypto_info->ivLength = 16;
+    crypto_info->iv = av_mallocz(crypto_info->ivLength);
+    crypto_info->keyLength = 16;
+    crypto_info->key = av_mallocz(crypto_info->keyLength);
+    crypto_info->numSubSamples = 0;
+    av_log(NULL, AV_LOG_WARNING, "ff_AMediaCodec_CryptoInfo_new %p\n", crypto_info);
+    return crypto_info;
+}
+
+int ff_AMediaCodec_CryptoInfo_delete(FFAMediaCodecCryptoInfo *crypto_info)
+{
+    av_log(NULL, AV_LOG_WARNING, "ff_AMediaCodec_CryptoInfo_delete %p\n", crypto_info);
+    av_freep(&crypto_info->iv);
+    av_freep(&crypto_info->key);
+    av_freep(&crypto_info->numBytesOfClearData);
+    av_freep(&crypto_info->numBytesOfEncryptedData);
+    av_freep(&crypto_info);
+    return 0;
+}
+
+int ff_AMediaCodec_CryptoInfo_fill(uint8_t *key_data, uint32_t key_data_size, FFAMediaCodecCryptoInfo **crypto_info, uint32_t av_data_len)
+{
+    FFAMediaCodecCryptoInfo *out = *crypto_info;
+    uint32_t subsample_count;
+    uint8_t iv_size = key_data[0] & 0x7F;
+    uint8_t is_encrypted = key_data[0] & 0x80;
+    uint8_t scheme_type= key_data[1];
+    uint8_t default_crypto_byte_block = key_data[2];
+    uint8_t default_skip_byte_block = key_data[3];
+    key_data += 4;
+
+    if (scheme_type == 1/*cenc*/ || scheme_type == 3/*cens*/) {
+        out->mode = 1;//MediaCodec#CryptoInfo#CRYPTO_MODE_AES_CTR
+    } else if (scheme_type == 2/*cbc1*/ || scheme_type == 4/*cbcs*/) {
+        out->mode = 2;//MediaCodec#CryptoInfo#CRYPTO_MODE_AES_CBC
+    } else {
+        out->mode = 0;//MediaCodec#CryptoInfo#CRYPTO_MODE_UNENCRYPTED
+    }
+    out->encryptBlocks = default_crypto_byte_block;
+    out->skipBlocks = default_skip_byte_block;
+
+    memset(out->iv, 0, out->ivLength);
+    memcpy(out->iv, key_data, iv_size);
+    key_data += iv_size;
+
+    subsample_count = ((key_data[0] << 8) | (key_data[1]));
+    key_data += 2;
+
+    if (subsample_count > out->numSubSamples) {
+        av_freep(&out->numBytesOfClearData);
+        av_freep(&out->numBytesOfEncryptedData);
+        out->numBytesOfClearData = av_mallocz(subsample_count * sizeof(int32_t));
+        out->numBytesOfEncryptedData = av_mallocz(subsample_count * sizeof(int32_t));
+    }
+    out->numSubSamples = subsample_count;
+
+    for (int i = 0; i < subsample_count; i++) {
+        out->numBytesOfClearData[i] = ((key_data[0] << 8) | (key_data[1]));
+        out->numBytesOfEncryptedData[i] = (((unsigned)(key_data[2]) << 24) | ((key_data[3]) << 16) | ((key_data[4]) << 8) | (key_data[5]));
+        key_data += 6;
+    }
+
+    memset(out->key, 0, out->keyLength);
+    memcpy(out->key, key_data, out->keyLength);
+
+    return 0;
 }
