@@ -225,6 +225,8 @@ typedef struct MOVStreamContext {
         int64_t auxiliary_info_index;
         struct AVAESCTR* aes_ctr;
     } cenc;
+    int64_t cur_retry_pos;
+    int cur_retry_times;
 } MOVStreamContext;
 
 typedef struct MOVContext {
@@ -279,6 +281,7 @@ typedef struct MOVContext {
     int32_t movie_display_matrix[3][3]; ///< display matrix from mvhd
     int enable_seek_detect;
     int64_t last_pos;
+    int max_retry_times;
 } MOVContext;
 
 int ff_mp4_read_descr_len(AVIOContext *pb);
