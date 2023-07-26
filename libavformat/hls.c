@@ -2189,7 +2189,9 @@ static int hls_read_packet(AVFormatContext *s, AVPacket *pkt)
 
         /* There may be more situations where this would be useful, but this at least
          * handles newly probed codecs properly (i.e. request_probe by mpegts). */
-        if (ist->codecpar->codec_id != st->codecpar->codec_id) {
+        if (ist->codecpar->codec_id != st->codecpar->codec_id
+            || ist->codecpar->width != st->codecpar->width
+            || ist->codecpar->sample_aspect_ratio.num != st->codecpar->sample_aspect_ratio.num) {
             ret = set_stream_info_from_input_stream(st, pls, ist);
             if (ret < 0) {
                 av_packet_unref(pkt);
