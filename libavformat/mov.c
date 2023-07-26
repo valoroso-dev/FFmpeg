@@ -995,6 +995,8 @@ static int mov_read_mdat(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     if (atom.size == 0) /* wrong one (MP4) */
         return 0;
     c->found_mdat=1;
+    if (c->enable_seek_detect)
+        c->last_pos = avio_tell(pb);
     return 0; /* now go for moov */
 }
 
@@ -6191,6 +6193,8 @@ static int mov_read_header(AVFormatContext *s)
 
     mov->fc = s;
     mov->trak_index = -1;
+    if (mov->enable_seek_detect)
+        mov->last_pos = 0;
     /* .mov and .mp4 aren't streamable anyway (only progressive download if moov is before mdat) */
     if (pb->seekable & AVIO_SEEKABLE_NORMAL)
         atom.size = avio_size(pb);
@@ -6533,6 +6537,18 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
         goto retry;
     }
     sc = st->priv_data;
+    if (mov->enable_seek_detect && mov->last_pos > 0 && mov->last_pos != avio_tell(sc->pb)) {
+        av_log(mov->fc, AV_LOG_INFO, "%s seek dectected %"PRId64"\n", __func__, mov->last_pos);
+        st->nb_index_entries = 0;
+        mov->found_mdat = 0;
+        mov_current_sample_set(sc, 0);
+        mov_read_default(mov, s->pb, (MOVAtom){ AV_RL32("root"), INT64_MAX });
+        sample = mov_find_next_sample(s, &st);
+        if (!sample) {
+            av_log(mov->fc, AV_LOG_ERROR, "cant find a valid sample after seek\n");
+            return AVERROR_INVALIDDATA;
+        }
+    }
     /* must be done just before reading, to avoid infinite loop on sample */
     current_index = sc->current_index;
     mov_current_sample_inc(sc);
@@ -6559,6 +6575,8 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
         }
 
         ret = av_get_packet(sc->pb, pkt, sample->size);
+        if (mov->enable_seek_detect)
+            mov->last_pos = avio_tell(sc->pb);
         if (ret < 0) {
             if (should_retry(sc->pb, ret)) {
                 mov_current_sample_dec(sc);
@@ -6832,6 +6850,8 @@ static const AVOption mov_options[] = {
         .flags = AV_OPT_FLAG_DECODING_PARAM },
     { "decryption_key", "The media decryption key (hex)", OFFSET(decryption_key), AV_OPT_TYPE_BINARY, .flags = AV_OPT_FLAG_DECODING_PARAM },
     { "enable_drefs", "Enable external track support.", OFFSET(enable_drefs), AV_OPT_TYPE_BOOL,
+        {.i64 = 0}, 0, 1, FLAGS },
+    { "mov_enable_seek_detect", "enable seek detect support.", OFFSET(enable_seek_detect), AV_OPT_TYPE_BOOL,
         {.i64 = 0}, 0, 1, FLAGS },
 
     { NULL },
