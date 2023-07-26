@@ -1209,6 +1209,21 @@ static void intercept_id3(struct playlist *pls, uint8_t *buf,
         pls->is_id3_timestamped = (pls->id3_mpegts_timestamp != AV_NOPTS_VALUE);
 }
 
+static int need_clear_dns(char *uri1, char *uri2)
+{
+    char hostname1[1024],hostname2[1024],proto[1024],path[1024];
+    int port1, port2;
+    av_url_split(proto, sizeof(proto), NULL, 0, hostname1, sizeof(hostname1),
+        &port1, path, sizeof(path), uri1);
+    av_url_split(proto, sizeof(proto), NULL, 0, hostname2, sizeof(hostname2),
+        &port2, path, sizeof(path), uri2);
+    av_log(NULL, AV_LOG_DEBUG, "need_clear_dns %s:%d, %s:%d", hostname1, port1, hostname2, port2);
+    if (!strcmp(hostname1, hostname2) && port1 != port2) {
+        return 1;
+    }
+    return 0;
+}
+
 static int open_input(HLSContext *c, struct playlist *pls, struct segment *seg, AVIOContext **in)
 {
     AVDictionary *opts = NULL;
@@ -1243,7 +1258,15 @@ static int open_input(HLSContext *c, struct playlist *pls, struct segment *seg, 
         char iv[33], key[33], url[MAX_URL_SIZE];
         if (strcmp(seg->key, pls->key_url)) {
             AVIOContext *pb = NULL;
-            if (open_url(pls->parent, &pb, seg->key, c->avio_opts, opts, NULL) == 0) {
+            av_dict_copy(&opts2, c->avio_opts, 0);
+            if (need_clear_dns(seg->key, seg->url)) {
+                // force parsing dns on new thread to avoid get same socket for same hostname but different port
+                av_dict_set_int(&opts2, "addrinfo_timeout", 100, 0);
+                av_dict_set_int(&opts2, "dns_cache_timeout", 100, 0);
+                av_dict_set_int(&opts2, "dns_cache_clear", 1, 0);
+                av_log(NULL, AV_LOG_WARNING, "force parsing dns on new thread");
+            }
+            if (open_url(pls->parent, &pb, seg->key, opts2, opts, NULL) == 0) {
                 ret = avio_read(pb, pls->key, sizeof(pls->key));
                 if (ret != sizeof(pls->key)) {
                     av_log(NULL, AV_LOG_ERROR, "Unable to read key file %s\n",
@@ -1255,6 +1278,8 @@ static int open_input(HLSContext *c, struct playlist *pls, struct segment *seg, 
                        seg->key);
             }
             av_strlcpy(pls->key_url, seg->key, sizeof(pls->key_url));
+            av_dict_free(&opts2);
+            opts2 = NULL;
         }
         ff_data_to_hex(iv, seg->iv, sizeof(seg->iv), 0);
         ff_data_to_hex(key, pls->key, sizeof(pls->key), 0);
