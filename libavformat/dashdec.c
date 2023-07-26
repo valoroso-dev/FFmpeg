@@ -1646,6 +1646,10 @@ static int64_t seek_data(void *opaque, int64_t offset, int whence)
 {
     struct representation *v = opaque;
     if (v->n_fragments && !v->init_sec_data_len) {
+        if (whence & AVSEEK_SIZE) {
+            return (v->input && v->input->seek) ? v->input->seek(v->input->opaque, offset, AVSEEK_SIZE) : AVERROR(ENOSYS);
+        }
+
         return avio_seek(v->input, offset, whence);
     }
 

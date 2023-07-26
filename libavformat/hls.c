@@ -1347,6 +1347,7 @@ static int update_init_section(struct playlist *pls, struct segment *seg)
     sec_size = FFMIN(sec_size, max_init_section_size);
 
     av_fast_malloc(&pls->init_sec_buf, &pls->init_sec_buf_size, sec_size);
+    pls->init_sec_buf_size = sec_size;
 
     ret = read_from_url(pls, seg->init_section, pls->init_sec_buf,
                         pls->init_sec_buf_size, READ_COMPLETE);
