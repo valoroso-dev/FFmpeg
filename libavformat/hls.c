@@ -160,6 +160,7 @@ struct playlist {
      * playlist, if any. */
     int n_init_sections;
     struct segment **init_sections;
+    int discon_seq_no;
 };
 
 /*
@@ -219,6 +220,8 @@ typedef struct HLSContext {
     AVIOContext *playlist_pb;
     int hls_io_protocol_enable;
     char * hls_io_protocol;
+
+    int handle_discontinuity;
 } HLSContext;
 
 static void free_segment_list(struct playlist *pls)
@@ -848,7 +851,14 @@ static int parse_playlist(HLSContext *c, const char *url,
             if (pls)
                 pls->finished = 1;
         } else if (av_strstart(line, "#EXT-X-DISCONTINUITY", &ptr)) {
+            av_log(NULL, AV_LOG_INFO, "#EXT-X-DISCONTINUITY\n");
             previous_duration = previous_duration1;
+            if (c->handle_discontinuity) {
+                if (c->first_packet && pls && !pls->finished) {
+                    pls->discon_seq_no = pls->start_seq_no + pls->n_segments;
+                    av_log(NULL, AV_LOG_INFO, "discon_seq_no is %d\n", pls->discon_seq_no);
+                }
+            }
         } else if (av_strstart(line, "#EXTINF:", &ptr)) {
             is_segment = 1;
             duration   = atof(ptr) * AV_TIME_BASE;
@@ -1711,9 +1721,11 @@ static int select_cur_seq_no(HLSContext *c, struct playlist *pls)
         /* If this is a live stream, start live_start_index segments from the
          * start or end */
         if (c->live_start_index < 0)
-            return pls->start_seq_no + FFMAX(pls->n_segments + c->live_start_index, 0);
+            seq_no = pls->start_seq_no + FFMAX(pls->n_segments + c->live_start_index, 0);
         else
-            return pls->start_seq_no + FFMIN(c->live_start_index, pls->n_segments - 1);
+            seq_no = pls->start_seq_no + FFMIN(c->live_start_index, pls->n_segments - 1);
+
+        return c->handle_discontinuity && c->first_packet ? FFMAX(pls->discon_seq_no, seq_no) : seq_no;
     }
 
     /* Otherwise just start on the first segment. */
@@ -2454,6 +2466,8 @@ static const AVOption hls_options[] = {
         OFFSET(hls_io_protocol), AV_OPT_TYPE_STRING, {.str= NULL}, 0, 0, FLAGS},
     {"hls_io_protocol_enable", "enable auto copy segment io protocol from playlist",
         OFFSET(hls_io_protocol_enable), AV_OPT_TYPE_BOOL, {.i64= 0}, 0, 1, FLAGS},
+    {"handle_discontinuity", "support handle tag #EXT-X-DISCONTINUITY",
+        OFFSET(handle_discontinuity), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, FLAGS},
     {NULL}
 };
 
