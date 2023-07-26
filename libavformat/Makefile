@@ -5,6 +5,7 @@ HEADERS = avformat.h                                                    \
           avio.h                                                        \
           version.h                                                     \
           avc.h                                                         \
+          hevc.h                                                        \
           url.h                                                         \
           internal.h                                                    \
           avio_internal.h                                               \
@@ -32,6 +33,7 @@ OBJS = allformats.o         \
        url.o                \
        utils.o              \
        avc.o                \
+       hevc.o               \
        ijkutils.o           \
 
 OBJS-$(HAVE_LIBC_MSVCRT)                 += file_open.o
