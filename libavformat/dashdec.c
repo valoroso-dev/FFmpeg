@@ -666,6 +666,7 @@ static int parse_manifest_representation(AVFormatContext *s, const char *url,
             ret = AVERROR(ENOMEM);
             goto end;
         }
+        rep->parent = s;
         representation_segmenttemplate_node = find_child_node_by_name(representation_node, "SegmentTemplate");
         representation_baseurl_node = find_child_node_by_name(representation_node, "BaseURL");
         representation_segmentlist_node = find_child_node_by_name(representation_node, "SegmentList");
