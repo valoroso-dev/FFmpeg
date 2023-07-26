@@ -156,6 +156,7 @@ struct playlist {
      * playlist, if any. */
     int n_init_sections;
     struct segment **init_sections;
+    int discon_seq_no;
 };
 
 /*
@@ -209,6 +210,8 @@ typedef struct HLSContext {
     int strict_std_compliance;
     char *allowed_extensions;
     int max_reload;
+
+    int handle_discontinuity;
 } HLSContext;
 
 static int read_chomp_line(AVIOContext *s, char *buf, int maxlen)
@@ -788,7 +791,14 @@ static int parse_playlist(HLSContext *c, const char *url,
             if (pls)
                 pls->finished = 1;
         } else if (av_strstart(line, "#EXT-X-DISCONTINUITY", &ptr)) {
+            av_log(NULL, AV_LOG_INFO, "#EXT-X-DISCONTINUITY\n");
             previous_duration = previous_duration1;
+            if (c->handle_discontinuity) {
+                if (c->first_packet && pls && !pls->finished) {
+                    pls->discon_seq_no = pls->start_seq_no + pls->n_segments;
+                    av_log(NULL, AV_LOG_INFO, "discon_seq_no is %d\n", pls->discon_seq_no);
+                }
+            }
         } else if (av_strstart(line, "#EXTINF:", &ptr)) {
             is_segment = 1;
             duration   = atof(ptr) * AV_TIME_BASE;
@@ -1527,9 +1537,11 @@ static int select_cur_seq_no(HLSContext *c, struct playlist *pls)
         /* If this is a live stream, start live_start_index segments from the
          * start or end */
         if (c->live_start_index < 0)
-            return pls->start_seq_no + FFMAX(pls->n_segments + c->live_start_index, 0);
+            seq_no = pls->start_seq_no + FFMAX(pls->n_segments + c->live_start_index, 0);
         else
-            return pls->start_seq_no + FFMIN(c->live_start_index, pls->n_segments - 1);
+            seq_no = pls->start_seq_no + FFMIN(c->live_start_index, pls->n_segments - 1);
+
+        return c->handle_discontinuity && c->first_packet ? FFMAX(pls->discon_seq_no, seq_no) : seq_no;
     }
 
     /* Otherwise just start on the first segment. */
@@ -2231,6 +2243,8 @@ static const AVOption hls_options[] = {
         INT_MIN, INT_MAX, FLAGS},
     {"max_reload", "Maximum number of times a insufficient list is attempted to be reloaded",
         OFFSET(max_reload), AV_OPT_TYPE_INT, {.i64 = 1000}, 0, INT_MAX, FLAGS},
+    {"handle_discontinuity", "support handle tag #EXT-X-DISCONTINUITY",
+        OFFSET(handle_discontinuity), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, FLAGS},
     {NULL}
 };
 
