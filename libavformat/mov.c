@@ -4362,7 +4362,14 @@ static int mov_read_trun(MOVContext *c, AVIOContext *pb, MOVAtom atom)
             if (ctts_index != old_nb_index_entries) {
                 memmove(sc->ctts_data + ctts_index + 1, sc->ctts_data + ctts_index,
                         sizeof(*sc->ctts_data) * (sc->ctts_count - ctts_index));
-                if (ctts_index <= sc->current_sample) {
+                // modified by valoroso to play the correct frame atfer seeking in the following scenarios.
+                // 1. buffered from 0th second to 10th sencod. then seek to 60th second.
+                // 2. AVIOContext restart to buffer from 60th second. so there is not frame from 10th second to 60th second.
+                // 3. seek to 20th second. AVIOContext restart to buffer from 20th second.
+                // 4. after loading a moof, there are frames in 0~10, 20~30, 60~70 duration but not in 10~20, 30~60.
+                // 5. when play to 30th second, the next frame is pointing to 60 second. so we need to delete this code to
+                //    let it pointing to 31th second.
+                if (ctts_index <= sc->current_sample && ctts_index <= sc->last_sample) {
                     // if we inserted a new item before the current sample, move the
                     // counter ahead so it is still pointing to the same sample.
                     sc->current_sample++;
@@ -6632,6 +6639,7 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
     if (mov->aax_mode)
         aax_filter(pkt->data, pkt->size, mov);
 
+    sc->last_sample = current_index;
     if (sc->cenc.aes_ctr) {
         ret = cenc_filter(mov, sc, current_index, pkt->data, pkt->size);
         if (ret) {

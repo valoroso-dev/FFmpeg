@@ -158,6 +158,7 @@ typedef struct MOVStreamContext {
     int *keyframes;
     int time_scale;
     int64_t time_offset;  ///< time offset of the edit list entries
+    int last_sample;
     int current_sample;
     int64_t current_index;
     MOVIndexRange* index_ranges;
