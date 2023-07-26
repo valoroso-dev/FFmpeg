@@ -1802,6 +1802,8 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
     for (i = 0; i < c->n_playlists; i++) {
         struct playlist *pls = c->playlists[i];
         AVInputFormat *in_fmt = NULL;
+        AVDictionary *in_fmt_opts = NULL;
+        AVDictionaryEntry *sub_entry = NULL;
 
         if (!(pls->ctx = avformat_alloc_context())) {
             ret = AVERROR(ENOMEM);
@@ -1856,7 +1858,10 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
         if ((ret = ff_copy_whiteblacklists(pls->ctx, s)) < 0)
             goto fail;
 
-        ret = avformat_open_input(&pls->ctx, pls->segments[0]->url, in_fmt, NULL);
+        if ((sub_entry = av_dict_get(c->avio_opts, "max_retry_times", NULL, 0))) {
+            av_dict_set(&in_fmt_opts, "max_retry_times", sub_entry->value, 0);
+        }
+        ret = avformat_open_input(&pls->ctx, pls->segments[0]->url, in_fmt, &in_fmt_opts);
         if (ret < 0)
             goto fail;
 
