@@ -1922,6 +1922,10 @@ typedef struct AVFormatContext {
      * - decoding: set by user
      */
     int max_streams;
+
+    // custom properties
+    int live_quick_start;
+    void* owner;
 } AVFormatContext;
 
 /**

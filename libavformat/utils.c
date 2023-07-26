@@ -3521,6 +3521,8 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
     int64_t probesize = ic->probesize;
     int eof_reached = 0;
     int *missing_streams = av_opt_ptr(ic->iformat->priv_class, ic->priv_data, "missing_streams");
+    int has_enlarged = 0;
+    int video_index = 0;
 
     flush_codecs = probesize > 0;
 
@@ -3539,7 +3541,7 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
     }
 
     if (ic->pb)
-        av_log(ic, AV_LOG_DEBUG, "Before avformat_find_stream_info() pos: %"PRId64" bytes read:%"PRId64" seeks:%d nb_streams:%d\n",
+        av_log(ic, AV_LOG_DEBUG, "Rapid Before avformat_find_stream_info() pos: %"PRId64" bytes read:%"PRId64" seeks:%d nb_streams:%d\n",
                avio_tell(ic->pb), ic->pb->bytes_read, ic->pb->seek_count, ic->nb_streams);
 
     for (i = 0; i < ic->nb_streams; i++) {
@@ -3625,8 +3627,22 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
         ic->streams[i]->info->fps_first_dts = AV_NOPTS_VALUE;
         ic->streams[i]->info->fps_last_dts  = AV_NOPTS_VALUE;
+        if (AVMEDIA_TYPE_VIDEO == ic->streams[i]->codecpar->codec_type) {
+            video_index = i;
+        }
     }
-
+    // max 32 tracks, 1 bit for 1 track
+    const int all_streams_processed = (0x1 << ic->nb_streams) -1;
+    int streams_decode_state = 0;
+#define STATE_GET(n) ((streams_decode_state >> (n)) & (0x1))
+#define STATE_SET(n, frame_meida_type) \
+    { \
+        streams_decode_state |= ((0x1) << (n)); \
+        int tmp_index = count; \
+        if (ic->control_message_cb) { \
+            ic->control_message_cb(ic, frame_meida_type, &tmp_index, 4); \
+        } \
+    }
     read_size = 0;
     for (;;) {
         int analyzed_all_streams;
@@ -3703,6 +3719,12 @@ FF_ENABLE_DEPRECATION_WARNINGS
                 break;
             }
         }
+        // if we did not get at least 1 video and 1 audio, enlarge the probesize and try one more times
+        if (ic->live_quick_start && read_size >= probesize && has_enlarged == 0 && (STATE_GET(video_index) == 0)) {
+            av_log(ic, AV_LOG_INFO, "enlarge probesize to find more stream info read&probe is %d,%d\n", read_size, probesize);
+            probesize += 350000;
+            has_enlarged = 1;
+        }
         /* We did not get all the codec info, but we read too much data. */
         if (read_size >= probesize) {
             ret = count;
@@ -3733,6 +3755,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
         pkt = &pkt1;
 
+        av_log(ic, AV_LOG_DEBUG, "get pkt stream=%d, pts=%s, dts=%s, size=%d, duration=%"PRId64", flags=%d\n",
+               pkt->stream_index, av_ts2str(pkt->pts), av_ts2str(pkt->dts), pkt->size, pkt->duration, pkt->flags);
         if (!(ic->flags & AVFMT_FLAG_NOBUFFER)) {
             ret = add_to_pktbuf(&ic->internal->packet_buffer, pkt,
                                 &ic->internal->packet_buffer_end, 0);
@@ -3845,14 +3869,31 @@ FF_ENABLE_DEPRECATION_WARNINGS
          * least one frame of codec data, this makes sure the codec initializes
          * the channel configuration and does not only trust the values from
          * the container. */
-        try_decode_frame(ic, st, pkt,
-                         (options && i < orig_nb_streams) ? &options[i] : NULL);
+        if (ic->live_quick_start) {
+            int index = pkt->stream_index;
+            if (STATE_GET(index) == 0 &&(pkt->flags& AV_PKT_FLAG_KEY)) {
+                int nextstate = 1;
+                // only decode audio
+                if (pkt->stream_index != video_index) {
+                    nextstate = try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL) > 0 ? 1 : 0;
+                }
+                if(nextstate) {
+                    STATE_SET(index, st->codecpar->codec_type);
+                }
+                av_log(ic, AV_LOG_DEBUG, "Rapid avformat_find_stream_info for loop try_decode_frame start pkt.size=%d,stream_index=%d,state=%d\n",pkt->size,pkt->stream_index,streams_decode_state);
+            }
+        } else {
+            try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL);
+        }
 
         if (ic->flags & AVFMT_FLAG_NOBUFFER)
             av_packet_unref(pkt);
 
         st->codec_info_nb_frames++;
         count++;
+        if (streams_decode_state == all_streams_processed) {
+           break;
+        }
     }
 
     if (eof_reached) {
