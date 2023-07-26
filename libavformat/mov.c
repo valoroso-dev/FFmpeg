@@ -6667,6 +6667,11 @@ static int mov_seek_fragment(AVFormatContext *s, AVStream *st, int64_t timestamp
                     if (index->items[j].headers_read)
                         return 0;
 
+                    if (s->pb->error == AVERROR_EOF) {
+                        s->pb->error = 0;
+                        s->pb->eof_reached = 0;
+                        av_log(s, AV_LOG_INFO, "clear eof flag after seeking\n");
+                    }
                     return mov_switch_root(s, index->items[j].moof_offset);
                 }
             }
