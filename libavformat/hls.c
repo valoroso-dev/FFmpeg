@@ -2433,6 +2433,11 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
     if ((flags & AVSEEK_FLAG_BYTE) || (c->ctx->ctx_flags & AVFMTCTX_UNSEEKABLE))
         return AVERROR(ENOSYS);
 
+    // fix issue: cant seek immediately after avformat_find_stream_info, because it need read a additional pkt to get first_timestamp
+    if (c->first_timestamp == 0 && s->start_time != AV_NOPTS_VALUE) {
+        c->first_timestamp = s->start_time;
+        av_log(s, AV_LOG_WARNING, "set first_timestamp to %"PRId64"\n", c->first_timestamp);
+    }
     first_timestamp = c->first_timestamp == AV_NOPTS_VALUE ?
                       0 : c->first_timestamp;
 
