@@ -212,6 +212,7 @@ typedef struct HLSContext {
     int max_reload;
 
     int handle_discontinuity;
+    int copy_substream_metadata;
 } HLSContext;
 
 static int read_chomp_line(AVIOContext *s, char *buf, int maxlen)
@@ -1628,6 +1629,8 @@ static int set_stream_info_from_input_stream(AVStream *st, struct playlist *pls,
 static int update_streams_from_subdemuxer(AVFormatContext *s, struct playlist *pls)
 {
     int err;
+    AVDictionaryEntry *t1, *t2;
+    HLSContext *c = s->priv_data;
 
     while (pls->n_main_streams < pls->ctx->nb_streams) {
         int ist_idx = pls->n_main_streams;
@@ -1645,6 +1648,12 @@ static int update_streams_from_subdemuxer(AVFormatContext *s, struct playlist *p
         err = set_stream_info_from_input_stream(st, pls, ist);
         if (err < 0)
             return err;
+
+        if (c->copy_substream_metadata)
+            if (!(t1 = av_dict_get(st->metadata, "language", NULL, 0)) && (t2 = av_dict_get(ist->metadata, "language", NULL, 0))) {
+                av_dict_set(&st->metadata, "language", t2->value, 0);
+                av_log(s, AV_LOG_WARNING, "copy language param from substream to stream %s\n", t2->value);
+            }
     }
 
     return 0;
@@ -2311,6 +2320,8 @@ static const AVOption hls_options[] = {
         OFFSET(max_reload), AV_OPT_TYPE_INT, {.i64 = 1000}, 0, INT_MAX, FLAGS},
     {"handle_discontinuity", "support handle tag #EXT-X-DISCONTINUITY",
         OFFSET(handle_discontinuity), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, FLAGS},
+    {"copy_substream_metadata", "copy substream metadata to hls stream",
+        OFFSET(copy_substream_metadata), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS},
     {NULL}
 };
 
