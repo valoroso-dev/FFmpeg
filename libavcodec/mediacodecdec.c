@@ -34,6 +34,7 @@
 #include "h264_parse.h"
 #include "hevc_parse.h"
 #include "internal.h"
+#include "mediacodec.h"
 #include "mediacodec_wrapper.h"
 #include "mediacodecdec_common.h"
 
@@ -303,6 +304,45 @@ static int vpx_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
 }
 #endif
 
+#if CONFIG_AAC_MEDIACODEC_DECODER || CONFIG_AAC_LATM_MEDIACODEC_DECODER
+static int aac_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
+{
+    int ret = 0;
+
+    if (avctx->extradata) {
+        ff_AMediaFormat_setBuffer(format, "csd-0", avctx->extradata, avctx->extradata_size);
+    }
+
+    return ret;
+}
+#endif
+
+#if CONFIG_MP2_MEDIACODEC_DECODER || CONFIG_MP3_MEDIACODEC_DECODER
+static int mpeg_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
+{
+    int ret = 0;
+
+    if (avctx->extradata) {
+        ff_AMediaFormat_setBuffer(format, "csd-0", avctx->extradata, avctx->extradata_size);
+    }
+
+    return ret;
+}
+#endif
+
+#if CONFIG_AC3_MEDIACODEC_DECODER
+static int ac3_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
+{
+    int ret = 0;
+
+    if (avctx->extradata) {
+        ff_AMediaFormat_setBuffer(format, "csd-0", avctx->extradata, avctx->extradata_size);
+    }
+
+    return ret;
+}
+#endif
+
 static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
 {
     int ret;
@@ -374,6 +414,43 @@ static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
             goto done;
         break;
 #endif
+#if CONFIG_AAC_MEDIACODEC_DECODER || CONFIG_AAC_LATM_MEDIACODEC_DECODER
+    case AV_CODEC_ID_AAC:
+    case AV_CODEC_ID_AAC_LATM:
+        codec_mime = "audio/mp4a-latm";
+
+        ret = aac_set_extradata(avctx, format);
+        if (ret < 0)
+            goto done;
+        break;
+#endif
+#if CONFIG_MP2_MEDIACODEC_DECODER
+    case AV_CODEC_ID_MP2:
+        codec_mime = "audio/mpeg-L2";
+
+        ret = mpeg_set_extradata(avctx, format);
+        if (ret < 0)
+            goto done;
+        break;
+#endif
+#if CONFIG_MP3_MEDIACODEC_DECODER
+    case AV_CODEC_ID_MP3:
+        codec_mime = "audio/mpeg";
+
+        ret = mpeg_set_extradata(avctx, format);
+        if (ret < 0)
+            goto done;
+        break;
+#endif
+#if CONFIG_AC3_MEDIACODEC_DECODER
+    case AV_CODEC_ID_AC3:
+        codec_mime = "audio/ac3";
+
+        ret = ac3_set_extradata(avctx, format);
+        if (ret < 0)
+            goto done;
+        break;
+#endif
     default:
         av_assert0(0);
     }
@@ -381,6 +458,9 @@ static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
     ff_AMediaFormat_setString(format, "mime", codec_mime);
     ff_AMediaFormat_setInt32(format, "width", avctx->width);
     ff_AMediaFormat_setInt32(format, "height", avctx->height);
+    ff_AMediaFormat_setInt32(format, "sample-rate", avctx->sample_rate);
+    ff_AMediaFormat_setInt32(format, "channel-count", avctx->channels);
+    // ff_AMediaFormat_setInt32(format, "pcm-encoding", /* ENCODING_PCM_16BIT */ 2);
 
     s->ctx = av_mallocz(sizeof(*s->ctx));
     if (!s->ctx) {
@@ -427,6 +507,7 @@ static int mediacodec_decode_frame(AVCodecContext *avctx, void *data,
                                    int *got_frame, AVPacket *avpkt)
 {
     MediaCodecH264DecContext *s = avctx->priv_data;
+    AVMediaCodecContext *user_ctx = avctx->hwaccel_context;
     AVFrame *frame    = data;
     int ret;
 
@@ -475,6 +556,10 @@ static int mediacodec_decode_frame(AVCodecContext *avctx, void *data,
 
     /* process buffered data */
     while (!*got_frame) {
+        if (user_ctx && user_ctx->abort_request) {
+            av_log(avctx, AV_LOG_INFO, "%s: user request abort\n", __func__);
+            break;
+        }
         /* prepare the input data */
         if (s->buffered_pkt.size <= 0) {
             av_packet_unref(&s->buffered_pkt);
@@ -603,6 +688,86 @@ AVCodec ff_vp9_mediacodec_decoder = {
     .long_name      = NULL_IF_CONFIG_SMALL("VP9 Android MediaCodec decoder"),
     .type           = AVMEDIA_TYPE_VIDEO,
     .id             = AV_CODEC_ID_VP9,
+    .priv_data_size = sizeof(MediaCodecH264DecContext),
+    .init           = mediacodec_decode_init,
+    .decode         = mediacodec_decode_frame,
+    .flush          = mediacodec_decode_flush,
+    .close          = mediacodec_decode_close,
+    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
+    .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS,
+};
+#endif
+
+#ifdef CONFIG_AAC_MEDIACODEC_DECODER
+AVCodec ff_aac_mediacodec_decoder = {
+    .name           = "aac_mediacodec",
+    .long_name      = NULL_IF_CONFIG_SMALL("AAC Android MediaCodec decoder"),
+    .type           = AVMEDIA_TYPE_AUDIO,
+    .id             = AV_CODEC_ID_AAC,
+    .priv_data_size = sizeof(MediaCodecH264DecContext),
+    .init           = mediacodec_decode_init,
+    .decode         = mediacodec_decode_frame,
+    .flush          = mediacodec_decode_flush,
+    .close          = mediacodec_decode_close,
+    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
+    .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS,
+};
+#endif
+
+#ifdef CONFIG_AAC_LATM_MEDIACODEC_DECODER
+AVCodec ff_aac_latm_mediacodec_decoder = {
+    .name           = "aac_latm_mediacodec",
+    .long_name      = NULL_IF_CONFIG_SMALL("AAC LATM Android MediaCodec decoder"),
+    .type           = AVMEDIA_TYPE_AUDIO,
+    .id             = AV_CODEC_ID_AAC_LATM,
+    .priv_data_size = sizeof(MediaCodecH264DecContext),
+    .init           = mediacodec_decode_init,
+    .decode         = mediacodec_decode_frame,
+    .flush          = mediacodec_decode_flush,
+    .close          = mediacodec_decode_close,
+    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
+    .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS,
+};
+#endif
+
+#ifdef CONFIG_MP2_MEDIACODEC_DECODER
+AVCodec ff_mp2_mediacodec_decoder = {
+    .name           = "mp2_mediacodec",
+    .long_name      = NULL_IF_CONFIG_SMALL("MP2 Android MediaCodec decoder"),
+    .type           = AVMEDIA_TYPE_AUDIO,
+    .id             = AV_CODEC_ID_MP2,
+    .priv_data_size = sizeof(MediaCodecH264DecContext),
+    .init           = mediacodec_decode_init,
+    .decode         = mediacodec_decode_frame,
+    .flush          = mediacodec_decode_flush,
+    .close          = mediacodec_decode_close,
+    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
+    .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS,
+};
+#endif
+
+#ifdef CONFIG_MP3_MEDIACODEC_DECODER
+AVCodec ff_mp3_mediacodec_decoder = {
+    .name           = "mp3_mediacodec",
+    .long_name      = NULL_IF_CONFIG_SMALL("MP3 Android MediaCodec decoder"),
+    .type           = AVMEDIA_TYPE_AUDIO,
+    .id             = AV_CODEC_ID_MP3,
+    .priv_data_size = sizeof(MediaCodecH264DecContext),
+    .init           = mediacodec_decode_init,
+    .decode         = mediacodec_decode_frame,
+    .flush          = mediacodec_decode_flush,
+    .close          = mediacodec_decode_close,
+    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
+    .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS,
+};
+#endif
+
+#ifdef CONFIG_AC3_MEDIACODEC_DECODER
+AVCodec ff_ac3_mediacodec_decoder = {
+    .name           = "ac3_mediacodec",
+    .long_name      = NULL_IF_CONFIG_SMALL("AC3 Android MediaCodec decoder"),
+    .type           = AVMEDIA_TYPE_AUDIO,
+    .id             = AV_CODEC_ID_AC3,
     .priv_data_size = sizeof(MediaCodecH264DecContext),
     .init           = mediacodec_decode_init,
     .decode         = mediacodec_decode_frame,

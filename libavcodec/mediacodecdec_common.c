@@ -166,6 +166,16 @@ static void ff_mediacodec_dec_unref(MediaCodecDecContext *s)
             s->surface = NULL;
         }
 
+        if (s->crypto) {
+            ff_mediacodec_media_crypto_unref(s->crypto, NULL);
+            s->crypto = NULL;
+        }
+
+        if (s->crypto_info) {
+            ff_AMediaCodec_CryptoInfo_delete(s->crypto_info);
+            s->crypto_info = NULL;
+        }
+
         av_freep(&s->codec_name);
         av_freep(&s);
     }
@@ -266,9 +276,28 @@ static int mediacodec_wrap_sw_buffer(AVCodecContext *avctx,
     int ret = 0;
     int status = 0;
 
-    frame->width = avctx->width;
-    frame->height = avctx->height;
-    frame->format = avctx->pix_fmt;
+    if (avctx->codec_type == AVMEDIA_TYPE_AUDIO) {
+        frame->sample_rate = avctx->sample_rate;
+        frame->channels = avctx->channels;
+        frame->channel_layout = avctx->channel_layout;
+        frame->format = s->pcm_encoding == 4 ? AV_SAMPLE_FMT_FLT : (s->pcm_encoding == 3 ? AV_SAMPLE_FMT_U8 : AV_SAMPLE_FMT_S16);
+        if (avctx->frame_size) {
+            frame->nb_samples = avctx->frame_size;
+        } else {
+            if (frame->format == AV_SAMPLE_FMT_FLT) {
+                frame->nb_samples = info->size / frame->channels / 4;
+            } else if (frame->format == AV_SAMPLE_FMT_U8) {
+                frame->nb_samples = info->size / frame->channels;
+            } else {
+                frame->nb_samples = info->size / frame->channels / 2;
+            }
+        }
+        frame->key_frame = 1;
+    } else {
+        frame->width = avctx->width;
+        frame->height = avctx->height;
+        frame->format = avctx->pix_fmt;
+    }
 
     /* MediaCodec buffers needs to be copied to our own refcounted buffers
      * because the flush command invalidates all input and output buffers.
@@ -296,6 +325,11 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
     frame->pkt_dts = AV_NOPTS_VALUE;
 
+    if (avctx->codec_type == AVMEDIA_TYPE_AUDIO) {
+    av_log(avctx, AV_LOG_DEBUG,
+            "Frame: sample_rate=%d channels=%d format=%d\n" , s->sample_rate, s->channel_count, frame->format);
+        ff_mediacodec_sw_buffer_copy_audio(avctx, s, data, size, info, frame);
+    } else {
     av_log(avctx, AV_LOG_DEBUG,
             "Frame: width=%d stride=%d height=%d slice-height=%d "
             "crop-top=%d crop-bottom=%d crop-left=%d crop-right=%d encoder=%s\n"
@@ -326,6 +360,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
         ret = AVERROR(EINVAL);
         goto done;
     }
+    }
 
     ret = 0;
 done:
@@ -338,8 +373,53 @@ done:
     return ret;
 }
 
-static int mediacodec_dec_parse_format(AVCodecContext *avctx, MediaCodecDecContext *s)
-{
+static int mediacodec_dec_parse_audio_format(AVCodecContext *avctx, MediaCodecDecContext *s) {
+    int32_t value = 0;
+    char *format = NULL;
+
+    if (!s->format) {
+        av_log(avctx, AV_LOG_ERROR, "Output MediaFormat is not set\n");
+        return AVERROR(EINVAL);
+    }
+
+    format = ff_AMediaFormat_toString(s->format);
+    if (!format) {
+        av_log(avctx, AV_LOG_ERROR, "Fail to parse MediaFormat\n");
+        return AVERROR_EXTERNAL;
+    }
+    av_log(avctx, AV_LOG_DEBUG, "Parsing MediaFormat %s\n", format);
+    av_freep(&format);
+
+    /* Mandatory fields */
+    if (!ff_AMediaFormat_getInt32(s->format, "sample-rate", &value)) {
+        format = ff_AMediaFormat_toString(s->format);
+        av_log(avctx, AV_LOG_ERROR, "Could not get %s from format %s\n", "sample-rate", format);
+        av_freep(&format);
+        return AVERROR_EXTERNAL;
+    }
+    s->sample_rate = value;
+
+    if (!ff_AMediaFormat_getInt32(s->format, "channel-count", &value)) {
+        format = ff_AMediaFormat_toString(s->format);
+        av_log(avctx, AV_LOG_ERROR, "Could not get %s from format %s\n", "channel-count", format);
+        av_freep(&format);
+        return AVERROR_EXTERNAL;
+    }
+    s->channel_count = value;
+
+    if (ff_AMediaFormat_getInt32(s->format, "pcm-encoding", &value)) {
+        s->pcm_encoding = value;
+    } else {
+        s->pcm_encoding = /* ENCODING_PCM_16BIT */ 2;
+    }
+
+    av_log(avctx, AV_LOG_INFO,
+        "Output audio parameters sample_rate=%d channel_count=%d pcm_encoding=%d\n", s->sample_rate, s->channel_count, s->pcm_encoding);
+
+    return 0;
+}
+
+static int mediacodec_dec_parse_video_format(AVCodecContext *avctx, MediaCodecDecContext *s) {
     int width = 0;
     int height = 0;
     int32_t value = 0;
@@ -436,6 +516,13 @@ static int mediacodec_dec_parse_format(AVCodecContext *avctx, MediaCodecDecConte
     return ff_set_dimensions(avctx, width, height);
 }
 
+static int mediacodec_dec_parse_format(AVCodecContext *avctx, MediaCodecDecContext *s)
+{
+    if (avctx->codec_type == AVMEDIA_TYPE_AUDIO) {
+        return mediacodec_dec_parse_audio_format(avctx, s);
+    }
+    return mediacodec_dec_parse_video_format(avctx, s);
+}
 
 static int mediacodec_dec_flush_codec(AVCodecContext *avctx, MediaCodecDecContext *s)
 {
@@ -463,6 +550,7 @@ int ff_mediacodec_dec_init(AVCodecContext *avctx, MediaCodecDecContext *s,
     int ret = 0;
     int status;
     int profile;
+    AVMediaCodecContext *user_ctx = avctx->hwaccel_context;
 
     enum AVPixelFormat pix_fmt;
     static const enum AVPixelFormat pix_fmts[] = {
@@ -474,12 +562,14 @@ int ff_mediacodec_dec_init(AVCodecContext *avctx, MediaCodecDecContext *s,
 
     pix_fmt = ff_get_format(avctx, pix_fmts);
     if (pix_fmt == AV_PIX_FMT_MEDIACODEC) {
-        AVMediaCodecContext *user_ctx = avctx->hwaccel_context;
-
         if (user_ctx && user_ctx->surface) {
             s->surface = ff_mediacodec_surface_ref(user_ctx->surface, avctx);
             av_log(avctx, AV_LOG_INFO, "Using surface %p\n", s->surface);
         }
+    }
+    if (user_ctx && user_ctx->crypto) {
+        s->crypto = ff_mediacodec_media_crypto_ref(user_ctx->crypto, avctx);
+        av_log(avctx, AV_LOG_INFO, "Using media crypto %p\n", s->crypto);
     }
 
     profile = ff_AMediaCodecProfile_getProfileFromAVCodecContext(avctx);
@@ -489,11 +579,12 @@ int ff_mediacodec_dec_init(AVCodecContext *avctx, MediaCodecDecContext *s,
 
     s->codec_name = ff_AMediaCodecList_getCodecNameByType(mime, profile, 0, avctx);
     if (!s->codec_name) {
+        av_log(avctx, AV_LOG_ERROR, "can not find decoder for %s\n", mime);
         ret = AVERROR_EXTERNAL;
         goto fail;
     }
 
-    av_log(avctx, AV_LOG_DEBUG, "Found decoder %s\n", s->codec_name);
+    av_log(avctx, AV_LOG_INFO, "Found decoder %s\n", s->codec_name);
     s->codec = ff_AMediaCodec_createCodecByName(s->codec_name);
     if (!s->codec) {
         av_log(avctx, AV_LOG_ERROR, "Failed to create media decoder for type %s and name %s\n", mime, s->codec_name);
@@ -501,7 +592,7 @@ int ff_mediacodec_dec_init(AVCodecContext *avctx, MediaCodecDecContext *s,
         goto fail;
     }
 
-    status = ff_AMediaCodec_configure(s->codec, format, s->surface, NULL, 0);
+    status = ff_AMediaCodec_configure(s->codec, format, s->surface, s->crypto, 0);
     if (status < 0) {
         char *desc = ff_AMediaFormat_toString(format);
         av_log(avctx, AV_LOG_ERROR,
@@ -533,7 +624,7 @@ int ff_mediacodec_dec_init(AVCodecContext *avctx, MediaCodecDecContext *s,
         }
     }
 
-    av_log(avctx, AV_LOG_DEBUG, "MediaCodec %p started successfully\n", s->codec);
+    av_log(avctx, AV_LOG_INFO, "MediaCodec %p started successfully\n", s->codec);
 
     return 0;
 
@@ -555,6 +646,9 @@ int ff_mediacodec_dec_decode(AVCodecContext *avctx, MediaCodecDecContext *s,
     size_t size;
     FFAMediaCodec *codec = s->codec;
     FFAMediaCodecBufferInfo info = { 0 };
+    FFAMediaCodecCryptoInfo *crypto_info;
+    uint8_t *crypto_key_data = NULL;
+    int crypto_key_data_size = 0;
 
     int status;
 
@@ -623,7 +717,21 @@ int ff_mediacodec_dec_decode(AVCodecContext *avctx, MediaCodecDecContext *s,
                 pts = av_rescale_q(pts, avctx->pkt_timebase, av_make_q(1, 1000000));
             }
 
-            status = ff_AMediaCodec_queueInputBuffer(codec, index, 0, size, pts, 0);
+            if (pkt->flags & AV_PKT_FLAG_ENCRYPTED) {
+                if (!s->crypto_info) {
+                    s->crypto_info = ff_AMediaCodec_CryptoInfo_new();
+                }
+                if (!s->crypto_info) {
+                    av_log(avctx, AV_LOG_ERROR, "crypto info is invalid\n");
+                    return AVERROR_EXTERNAL;
+                }
+                crypto_info     = s->crypto_info;
+                crypto_key_data = av_packet_get_side_data(pkt, AV_PKT_DATA_DRM_KEY, &crypto_key_data_size);
+                ff_AMediaCodec_CryptoInfo_fill(crypto_key_data, crypto_key_data_size, &crypto_info, size);
+                status = ff_AMediaCodec_queueSecureInputBuffer(codec, index, 0, crypto_info, pts, 0);
+            } else {
+                status = ff_AMediaCodec_queueInputBuffer(codec, index, 0, size, pts, 0);
+            }
             if (status < 0) {
                 av_log(avctx, AV_LOG_ERROR, "Failed to queue input buffer (status = %d)\n", status);
                 return AVERROR_EXTERNAL;

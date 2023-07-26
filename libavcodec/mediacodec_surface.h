@@ -28,4 +28,7 @@
 void *ff_mediacodec_surface_ref(void *surface, void *log_ctx);
 int ff_mediacodec_surface_unref(void *surface, void *log_ctx);
 
+void *ff_mediacodec_media_crypto_ref(void *crypto, void *log_ctx);
+int ff_mediacodec_media_crypto_unref(void *crypto, void *log_ctx);
+
 #endif /* AVCODEC_MEDIACODEC_SURFACE_H */

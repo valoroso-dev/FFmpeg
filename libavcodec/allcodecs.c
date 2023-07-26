@@ -419,10 +419,13 @@ static void register_all(void)
 
     /* audio codecs */
     REGISTER_ENCDEC (AAC,               aac);
+    REGISTER_DECODER(AAC_MEDIACODEC,    aac_mediacodec);
     REGISTER_DECODER(AAC_FIXED,         aac_fixed);
     REGISTER_DECODER(AAC_LATM,          aac_latm);
+    REGISTER_DECODER(AAC_LATM_MEDIACODEC,aac_latm_mediacodec);
     REGISTER_ENCDEC (AC3,               ac3);
     REGISTER_ENCDEC (AC3_FIXED,         ac3_fixed);
+    REGISTER_DECODER(AC3_MEDIACODEC,    ac3_mediacodec);
     REGISTER_ENCDEC (ALAC,              alac);
     REGISTER_DECODER(ALS,               als);
     REGISTER_DECODER(AMRNB,             amrnb);
@@ -467,6 +470,8 @@ static void register_all(void)
     REGISTER_DECODER(MP2FLOAT,          mp2float);
     REGISTER_ENCODER(MP2FIXED,          mp2fixed);
     REGISTER_DECODER(MP3,               mp3);
+    REGISTER_DECODER(MP2_MEDIACODEC,    mp2_mediacodec);
+    REGISTER_DECODER(MP3_MEDIACODEC,    mp3_mediacodec);
     REGISTER_DECODER(MP3FLOAT,          mp3float);
     REGISTER_DECODER(MP3ADU,            mp3adu);
     REGISTER_DECODER(MP3ADUFLOAT,       mp3adufloat);

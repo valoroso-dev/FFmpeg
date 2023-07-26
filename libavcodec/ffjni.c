@@ -286,6 +286,7 @@ int ff_jni_init_jfields(JNIEnv *env, void *jfields, const struct FFJniField *jfi
 {
     int i, ret = 0;
     jclass last_clazz = NULL;
+    int last_clazz_mandatory = 1;
 
     for (i = 0; jfields_mapping[i].name; i++) {
         int mandatory = jfields_mapping[i].mandatory;
@@ -300,6 +301,7 @@ int ff_jni_init_jfields(JNIEnv *env, void *jfields, const struct FFJniField *jfi
             if ((ret = ff_jni_exception_check(env, mandatory, log_ctx)) < 0 && mandatory) {
                 goto done;
             }
+            last_clazz_mandatory = mandatory;
 
             last_clazz = *(jclass*)((uint8_t*)jfields + jfields_mapping[i].offset) =
                     global ? (*env)->NewGlobalRef(env, clazz) : clazz;
@@ -311,7 +313,7 @@ int ff_jni_init_jfields(JNIEnv *env, void *jfields, const struct FFJniField *jfi
         } else {
 
             if (!last_clazz) {
-                ret = AVERROR_EXTERNAL;
+                ret = last_clazz_mandatory ? AVERROR_EXTERNAL : 0;
                 break;
             }
 
