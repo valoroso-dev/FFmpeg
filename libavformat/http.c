@@ -127,6 +127,10 @@ typedef struct HTTPContext {
     char *tcp_hook;
     char * app_ctx_intptr;
     AVApplicationContext *app_ctx;
+#if CONFIG_ENABLE_DUMP_FILE
+    int enable_dump_file;
+    FILE *dump_file;
+#endif /* CONFIG_ENABLE_DUMP_FILE */
 } HTTPContext;
 
 #define OFFSET(x) offsetof(HTTPContext, x)
@@ -169,6 +173,9 @@ static const AVOption options[] = {
     { "reply_code", "The http status code to return to a client", OFFSET(reply_code), AV_OPT_TYPE_INT, { .i64 = 200}, INT_MIN, 599, E},
     { "http-tcp-hook", "hook protocol on tcp", OFFSET(tcp_hook), AV_OPT_TYPE_STRING, { .str = "tcp" }, 0, 0, D | E },
     { "ijkapplication", "AVApplicationContext", OFFSET(app_ctx_intptr), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, .flags = D },
+#if CONFIG_ENABLE_DUMP_FILE
+    { "enable_dump_file", "enable file dump", OFFSET(enable_dump_file), AV_OPT_TYPE_INT, { .i64 = 0},       0, INT_MAX, .flags = D|E },
+#endif /* CONFIG_ENABLE_DUMP_FILE */
     { NULL }
 };
 
@@ -250,6 +257,16 @@ static int http_open_cnx_internal(URLContext *h, AVDictionary **options)
                        auth, proxyauth, &location_changed);
     if (err < 0)
         return err;
+
+#if CONFIG_ENABLE_DUMP_FILE
+    if (s->enable_dump_file) {
+        mkdir("/sdcard/ffmpeg_dump", 0755);
+        char dump_path[256];
+        sprintf(dump_path, "/sdcard/ffmpeg_dump/%s", av_basename(path));
+        remove(dump_path);
+        s->dump_file = fopen(dump_path, "w");
+    }
+#endif /* CONFIG_ENABLE_DUMP_FILE */
 
     return location_changed;
 }
@@ -1540,6 +1557,12 @@ static int http_read(URLContext *h, uint8_t *buf, int size)
     size = http_read_stream(h, buf, size);
     if (size > 0)
         s->icy_data_read += size;
+#if CONFIG_ENABLE_DUMP_FILE
+    if (s->enable_dump_file) {
+        if (size > 0)
+            fwrite(buf, 1, size, s->dump_file);
+    }
+#endif /* CONFIG_ENABLE_DUMP_FILE */
     return size;
 }
 
@@ -1604,6 +1627,11 @@ static int http_close(URLContext *h)
     if (s->hd)
         ffurl_closep(&s->hd);
     av_dict_free(&s->chained_options);
+#if CONFIG_ENABLE_DUMP_FILE
+    if (s->enable_dump_file) {
+        fclose(s->dump_file);
+    }
+#endif
     return ret;
 }
 
