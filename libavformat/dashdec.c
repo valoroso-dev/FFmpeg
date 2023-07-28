@@ -1250,6 +1250,7 @@ static int parse_manifest(AVFormatContext *s, const char *url, AVIOContext *in)
                 }
             }
             node = xmlNextElementSibling(node);
+        }
         if (c->prefer_period_index > 0 && cur_period_idx > 1) {
             av_log(s, AV_LOG_INFO, "select the period index %d\n", c->prefer_period_index);
             av_dict_set_int(&s->metadata, "IJK-PLAYLIST-INFO", cur_period_idx * 10000 + c->prefer_period_index, 0);
@@ -1519,7 +1520,7 @@ static struct fragment *get_current_fragment(struct representation *pls)
                     continue;
                 }
                 refresh_manifest(pls->parent);
-                if (pls->cur_seq_no > calc_max_seg_no(pls)) {
+                if (pls->cur_seq_no > calc_max_seg_no(pls, c)) {
                     usleep_times = 200;
                 } else {
                     av_log(pls->parent, AV_LOG_VERBOSE, "new fragment: refresh finish cur[%"PRId64"]\n", pls->cur_seq_no);

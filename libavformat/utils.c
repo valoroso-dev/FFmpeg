@@ -3580,7 +3580,6 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
     int64_t max_subtitle_analyze_duration;
     int64_t probesize = ic->probesize;
     int eof_reached = 0;
-    int has_enlarged = 0;
     int *missing_streams = av_opt_ptr(ic->iformat->priv_class, ic->priv_data, "missing_streams");
     int has_enlarged = 0;
     int video_index = 0;
@@ -3644,7 +3643,7 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
     }
 
     flush_codecs = probesize > 0;
-	int video_index = 0;
+
     av_opt_set(ic, "skip_clear", "1", AV_OPT_SEARCH_CHILDREN);
 
     max_stream_analyze_duration = max_analyze_duration;
@@ -3762,6 +3761,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
             ic->control_message_cb(ic, frame_meida_type, &tmp_index, 4); \
         } \
     }
+
     read_size = 0;
     for (;;) {
         int analyzed_all_streams;
@@ -3844,8 +3844,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
             }
         }
         // if we did not get at least 1 video and 1 audio, enlarge the probesize and try one more times
-        if (ic->live_quick_start && read_size >= probesize && has_enlarged == 0 && (STATE_GET(video_index) == 0)) {
-            av_log(ic, AV_LOG_INFO, "enlarge probesize to find more stream info read&probe is %d,%d\n", read_size, probesize);
+        if (ic->live_quick_start && read_size >= probesize && has_enlarged == 0 && (STATE_GET(video_index) == 0 || streams_decode_state == (0x01 << video_index))) {
+            av_log(ic, AV_LOG_INFO, "enlarge probesize to find more stream info read&probe is %"PRId64", %"PRId64"",read_size, probesize);
             probesize += 350000;
             has_enlarged = 1;
         }

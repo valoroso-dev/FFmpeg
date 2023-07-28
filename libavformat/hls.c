@@ -2102,7 +2102,6 @@ fail:
 
 static int reopen_demux_for_component(AVFormatContext *s, struct playlist *pls)
 {
-    HLSContext *c = s->priv_data;
     AVInputFormat *in_fmt = NULL;
     struct segment *seg;
     int ret = 0;

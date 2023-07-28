@@ -52,6 +52,7 @@
 #define HTTP_MUTLI    2
 #define MAX_EXPIRY    19
 #define WHITESPACES " \n\t\r"
+#define CONFIG_ENABLE_DUMP_FILE 0
 typedef enum {
     LOWER_PROTO,
     READ_HEADERS,
