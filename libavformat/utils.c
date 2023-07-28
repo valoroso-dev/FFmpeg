@@ -1688,6 +1688,13 @@ FF_ENABLE_DEPRECATION_WARNINGS
             st->codecpar->channels = st->internal->avctx->channels;
             st->codecpar->channel_layout = st->internal->avctx->channel_layout;
             st->codecpar->codec_id = st->internal->avctx->codec_id;
+            if (!st->codecpar->width && st->internal->avctx->width) {
+                st->codecpar->width = st->internal->avctx->width;
+                st->codecpar->height = st->internal->avctx->height;
+            }
+            if (!st->codecpar->sample_aspect_ratio.num && st->internal->avctx->sample_aspect_ratio.num) {
+                st->codecpar->sample_aspect_ratio = st->internal->avctx->sample_aspect_ratio;
+            }
         } else {
             /* free packet */
             av_packet_unref(&cur_pkt);

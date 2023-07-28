@@ -1211,6 +1211,14 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
         return AVERROR_INVALIDDATA;
     }
 
+    if (!avctx->width) {
+        avctx->width = sps->width;
+        avctx->height = sps->height;
+    }
+    if (!avctx->sample_aspect_ratio.num) {
+        avctx->sample_aspect_ratio = sps->vui.sar;
+    }
+
     return 0;
 }
 

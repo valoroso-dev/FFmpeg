@@ -598,6 +598,11 @@ int ff_h264_decode_seq_parameter_set(GetBitContext *gb, AVCodecContext *avctx,
     if (!sps->sar.den)
         sps->sar.den = 1;
 
+    if(sps->sar.num) {
+        avctx->sample_aspect_ratio = sps->sar;
+        av_log(avctx, AV_LOG_DEBUG, "Rapid set avctx sar =[%d:%d]\n", sps->sar.num, sps->sar.den);
+    }
+
     if (avctx && avctx->debug & FF_DEBUG_PICT_INFO) {
         static const char csp[4][5] = { "Gray", "420", "422", "444" };
         av_log(avctx, AV_LOG_DEBUG,
