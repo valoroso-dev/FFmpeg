@@ -2086,6 +2086,69 @@ fail:
     return ret;
 }
 
+static int reopen_demux_for_component(AVFormatContext *s, struct playlist *pls)
+{
+    HLSContext *c = s->priv_data;
+    AVInputFormat *in_fmt = NULL;
+    struct segment *seg;
+    int ret = 0;
+
+    av_log(s, AV_LOG_ERROR, "start reopen_demux_for_component pls index %d\n", pls->index);
+
+    if (pls->ctx) {
+        /* note: the internal buffer could have changed, and be != pls->read_buffer */
+        av_freep(&pls->pb.buffer);
+        memset(&pls->pb, 0x00, sizeof(AVIOContext));
+        pls->ctx->pb = NULL;
+        avformat_close_input(&pls->ctx);
+        pls->ctx = NULL;
+    } else {
+        return 0;
+    }
+    if (!(pls->ctx = avformat_alloc_context())) {
+        ret = AVERROR(ENOMEM);
+        goto fail;
+    }
+    if (pls->n_segments == 0)
+        return 0;
+
+    pls->read_buffer = av_malloc(INITIAL_BUFFER_SIZE);
+    if (!pls->read_buffer){
+        ret = AVERROR(ENOMEM);
+        avformat_free_context(pls->ctx);
+        pls->ctx = NULL;
+        goto fail;
+    }
+    ffio_init_context(&pls->pb, pls->read_buffer, INITIAL_BUFFER_SIZE, 0, pls,
+                      read_data, NULL, NULL);
+    pls->pb.seekable = 0;
+    pls->cur_init_section = NULL;
+    seg = current_segment(pls);
+    ret = av_probe_input_buffer(&pls->pb, &in_fmt, seg->url,
+                                NULL, 0, 0);
+    if (ret < 0) {
+        av_log(s, AV_LOG_ERROR, "Error when loading first segment '%s'\n", seg->url);
+        avformat_free_context(pls->ctx);
+        pls->ctx = NULL;
+        goto fail;
+    }
+    pls->ctx->pb = &pls->pb;
+    pls->ctx->io_open  = nested_io_open;
+    pls->ctx->flags   |= s->flags & ~AVFMT_FLAG_CUSTOM_IO;
+    if ((ret = ff_copy_whiteblacklists(pls->ctx, s)) < 0)
+        goto fail;
+
+    ret = avformat_open_input(&pls->ctx, seg->url, in_fmt, NULL);
+    if (ret < 0)
+        goto fail;
+    ret = avformat_find_stream_info(pls->ctx, NULL);
+    if (ret < 0)
+        goto fail;
+
+fail:
+    return ret;
+}
+
 static int recheck_discard_flags(AVFormatContext *s, int first)
 {
     HLSContext *c = s->priv_data;
@@ -2425,6 +2488,9 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
              * specified stream where we should look for the keyframes */
             pls->seek_stream_index = -1;
             pls->seek_flags |= AVSEEK_FLAG_ANY;
+        }
+        if (pls->ctx->iformat && !strcmp(pls->ctx->iformat->name, "mov,mp4,m4a,3gp,3g2,mj2")) {
+            reopen_demux_for_component(s, pls);
         }
     }
 
