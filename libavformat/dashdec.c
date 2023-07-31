@@ -151,6 +151,7 @@ typedef struct DASHContext {
     int max_url_size;
     int refresh_advance_manifest;
     int prefer_period_index;
+    int merge_period;
 } DASHContext;
 
 static int ishttp(char *url)
@@ -1107,6 +1108,127 @@ static int parse_manifest_adaptationset(AVFormatContext *s, const char *url,
     return 0;
 }
 
+static int parse_segment_timeline_from_adaptionset(AVFormatContext *s, const char *url, struct representation *rep, xmlNodePtr adaptionset_node)
+{
+    xmlNodePtr representation_node = NULL;
+    xmlNodePtr segment_template_node = NULL;
+    xmlNodePtr segment_timeline_node = NULL;
+    enum AVMediaType type = AVMEDIA_TYPE_UNKNOWN;
+    int ret;
+
+    representation_node = find_child_node_by_name(adaptionset_node, "Representation");
+    if (!representation_node) {
+        av_log(s, AV_LOG_ERROR, "merge period error: cant find Representation\n");
+        return -11;
+    }
+    segment_template_node = find_child_node_by_name(representation_node, "SegmentTemplate");
+    if (!segment_template_node) {
+        av_log(s, AV_LOG_ERROR, "merge period error: cant find SegmentTemplate\n");
+        return -12;
+    }
+    segment_timeline_node = find_child_node_by_name(segment_template_node, "SegmentTimeline");
+    if (!segment_timeline_node) {
+        av_log(s, AV_LOG_ERROR, "merge period error: cant find SegmentTimeline\n");
+        return -13;
+    }
+    if (segment_timeline_node) {
+        segment_timeline_node = xmlFirstElementChild(segment_timeline_node);
+        while (segment_timeline_node) {
+            ret = parse_manifest_segmenttimeline(s, rep, segment_timeline_node);
+            if (ret < 0) {
+                return ret;
+            }
+            segment_timeline_node = xmlNextElementSibling(segment_timeline_node);
+        }
+    }
+
+    // try get information from representation
+    if (type == AVMEDIA_TYPE_UNKNOWN)
+        type = get_content_type(representation_node);
+    // try get information from adaption set
+    if (type == AVMEDIA_TYPE_UNKNOWN)
+        type = get_content_type(adaptionset_node);
+    rep->type = type;
+
+    return 0;
+}
+
+static int parse_segment_timeline_from_period(AVFormatContext *s, const char *url, struct representation **audio_rep, struct representation **video_rep, xmlNodePtr period_node)
+{
+    xmlNodePtr adaptionset_node = NULL;
+    int got_audio = 0;
+    int got_video = 0;
+
+    adaptionset_node = xmlFirstElementChild(period_node);
+    while (adaptionset_node) {
+        if (!av_strcasecmp(adaptionset_node->name, (const char *)"AdaptationSet")) {
+            if (!got_audio || !got_video) {
+                struct representation *rep = av_mallocz(sizeof(struct representation));
+                if (!rep) {
+                    return AVERROR(ENOMEM);
+                }
+                rep->type = AVMEDIA_TYPE_UNKNOWN;
+                parse_segment_timeline_from_adaptionset(s, url, rep, adaptionset_node);
+                if (rep->type == AVMEDIA_TYPE_AUDIO) {
+                    *audio_rep = rep;
+                    got_audio = 1;
+                } else if (rep->type == AVMEDIA_TYPE_VIDEO) {
+                    *video_rep = rep;
+                    got_video = 1;
+                } else {
+                    free_representation(rep);
+                }
+            }
+        }
+        adaptionset_node = xmlNextElementSibling(adaptionset_node);
+    }
+    return (got_audio || got_video) ? 0 : -1;
+}
+
+static int merge_manifest_period(AVFormatContext *s, const char *url, xmlNodePtr node)
+{
+    DASHContext *c = s->priv_data;
+    struct representation *target_audio_rep = NULL;
+    struct representation *target_video_rep = NULL;
+    int ret, i;
+
+    ret = parse_segment_timeline_from_period(s, url, &target_audio_rep, &target_video_rep, node);
+    if (ret < 0) {
+        return ret;
+    }
+    if (target_audio_rep && c->n_audios > 0 && c->audios[0]->n_timelines > 0) {
+        av_log(s, AV_LOG_DEBUG, "merge period by append %d audio segment\n", target_audio_rep->n_timelines);
+        for (i = 0; i < target_audio_rep->n_timelines; i++) {
+            struct timeline *tml = av_mallocz(sizeof(struct timeline));
+            if (!tml) {
+                return AVERROR(ENOMEM);
+            }
+            tml->duration = target_audio_rep->timelines[i]->duration;
+            tml->repeat = target_audio_rep->timelines[i]->repeat;
+            tml->starttime = target_audio_rep->timelines[i]->starttime;
+            av_log(s, AV_LOG_VERBOSE, "merge period by append audio segment %"PRId64"\n", tml->starttime);
+            dynarray_add(&c->audios[0]->timelines, &c->audios[0]->n_timelines, tml);
+        }
+        free_representation(target_audio_rep);
+    }
+    if (target_video_rep && c->n_videos > 0 && c->videos[0]->n_timelines > 0) {
+        av_log(s, AV_LOG_DEBUG, "merge period by append %d video segment\n", target_video_rep->n_timelines);
+        for (i = 0; i < target_video_rep->n_timelines; i++) {
+            struct timeline *tml = av_mallocz(sizeof(struct timeline));
+            if (!tml) {
+                return AVERROR(ENOMEM);
+            }
+            tml->duration = target_video_rep->timelines[i]->duration;
+            tml->repeat = target_video_rep->timelines[i]->repeat;
+            tml->starttime = target_video_rep->timelines[i]->starttime;
+            av_log(s, AV_LOG_VERBOSE, "merge period by append video segment %"PRId64"\n", tml->starttime);
+            dynarray_add(&c->videos[0]->timelines, &c->videos[0]->n_timelines, tml);
+        }
+        free_representation(target_video_rep);
+    }
+    return 0;
+}
+
 static int parse_manifest(AVFormatContext *s, const char *url, AVIOContext *in)
 {
     DASHContext *c = s->priv_data;
@@ -1252,6 +1374,8 @@ static int parse_manifest(AVFormatContext *s, const char *url, AVIOContext *in)
                 }
             }
             node = xmlNextElementSibling(node);
+            if (period_node && c->merge_period && !c->is_live)
+                break;
         }
         if (c->prefer_period_index > 0 && cur_period_idx > 1) {
             av_log(s, AV_LOG_INFO, "select the period index %d\n", c->prefer_period_index);
@@ -1275,6 +1399,29 @@ static int parse_manifest(AVFormatContext *s, const char *url, AVIOContext *in)
                 parse_manifest_adaptationset(s, url, adaptionset_node, mpd_baseurl_node, period_baseurl_node, period_segmenttemplate_node, period_segmentlist_node);
             }
             adaptionset_node = xmlNextElementSibling(adaptionset_node);
+        }
+        if (period_node && c->merge_period && !c->is_live) {
+            while (node) {
+                if (!av_strcasecmp(node->name, (const char *)"Period")) {
+                    period_duration_sec = 0;
+                    attr = node->properties;
+                    while (attr) {
+                        val = xmlGetProp(node, attr->name);
+                        if (!av_strcasecmp(attr->name, (const char *)"duration")) {
+                            period_duration_sec = get_duration_insec(s, (const char *)val);
+                        }
+                        attr = attr->next;
+                        xmlFree(val);
+                    }
+                    if (period_duration_sec > 0 && merge_manifest_period(s, url, node) == 0) {
+                        av_log(s, AV_LOG_INFO, "merge other period with duation %u\n", period_duration_sec);
+                        c->period_duration += period_duration_sec;
+                        if (c->period_start > 0)
+                            c->media_presentation_duration = c->period_duration;
+                    }
+                }
+                node = xmlNextElementSibling(node);
+            }
         }
 cleanup:
         /*free the document */
@@ -2200,6 +2347,8 @@ static const AVOption dash_options[] = {
         OFFSET(refresh_advance_manifest), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, FLAGS},
     {"prefer-period-index", "select the period equal the index",
         OFFSET(prefer_period_index), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, FLAGS},
+    {"merge-period", "merge other period's segment to first period",
+        OFFSET(merge_period), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS},
     {NULL}
 };
 
