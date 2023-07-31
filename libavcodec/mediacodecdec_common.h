@@ -71,6 +71,7 @@ typedef struct MediaCodecDecContext {
     int pcm_encoding;
 
     uint64_t output_buffer_count;
+    ssize_t current_input_buffer;
 
     bool delay_flush;
     atomic_int serial;
@@ -84,7 +85,8 @@ int ff_mediacodec_dec_init(AVCodecContext *avctx,
 
 int ff_mediacodec_dec_send(AVCodecContext *avctx,
                            MediaCodecDecContext *s,
-                           AVPacket *pkt);
+                           AVPacket *pkt,
+                           bool wait);
 
 int ff_mediacodec_dec_receive(AVCodecContext *avctx,
                               MediaCodecDecContext *s,

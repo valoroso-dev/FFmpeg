@@ -142,4 +142,6 @@ FFAMediaCodecCryptoInfo* ff_AMediaCodec_CryptoInfo_new(void);
 int ff_AMediaCodec_CryptoInfo_delete(FFAMediaCodecCryptoInfo *crypto_info);
 int ff_AMediaCodec_CryptoInfo_fill(uint8_t *key_data, uint32_t key_data_size, FFAMediaCodecCryptoInfo **crypto_info, uint32_t av_data_len);
 
+int ff_Build_SDK_INT(AVCodecContext *avctx);
+
 #endif /* AVCODEC_MEDIACODEC_WRAPPER_H */
