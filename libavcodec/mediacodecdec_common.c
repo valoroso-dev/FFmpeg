@@ -291,8 +291,8 @@ static int mediacodec_wrap_sw_buffer(AVCodecContext *avctx,
     int status = 0;
 
     if (avctx->codec_type == AVMEDIA_TYPE_AUDIO) {
-        frame->sample_rate = avctx->sample_rate;
-        frame->channels = avctx->channels;
+        frame->sample_rate = s->sample_rate;
+        frame->channels = s->channel_count;
         frame->channel_layout = avctx->channel_layout;
         frame->format = s->pcm_encoding == 4 ? AV_SAMPLE_FMT_FLT : (s->pcm_encoding == 3 ? AV_SAMPLE_FMT_U8 : AV_SAMPLE_FMT_S16);
         if (avctx->frame_size) {
