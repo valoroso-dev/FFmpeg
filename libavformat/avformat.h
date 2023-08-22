@@ -1934,8 +1934,10 @@ typedef struct AVFormatContext {
 
     // custom properties
     int live_quick_start;
+    int64_t enlarge_probesize;
     void* owner;
     AVIOInterruptCB drm_update_callback;
+    int drm_source;
 } AVFormatContext;
 
 #if FF_API_FORMAT_GET_SET

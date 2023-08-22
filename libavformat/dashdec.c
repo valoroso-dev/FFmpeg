@@ -152,6 +152,7 @@ typedef struct DASHContext {
     int refresh_advance_manifest;
     int prefer_period_index;
     int merge_period;
+    int initial_buffer_size;
 } DASHContext;
 
 static int ishttp(char *url)
@@ -1948,6 +1949,7 @@ static int reopen_demux_for_component(AVFormatContext *s, struct representation 
     AVInputFormat *in_fmt = NULL;
     AVDictionary  *in_fmt_opts = NULL;
     uint8_t *avio_ctx_buffer  = NULL;
+    int initial_buffer_size = INITIAL_BUFFER_SIZE;
     int ret = 0, i;
 
     if (pls->ctx) {
@@ -1958,7 +1960,11 @@ static int reopen_demux_for_component(AVFormatContext *s, struct representation 
         goto fail;
     }
 
-    avio_ctx_buffer  = av_malloc(INITIAL_BUFFER_SIZE);
+    if (c->initial_buffer_size > INITIAL_BUFFER_SIZE) {
+        initial_buffer_size = c->initial_buffer_size;
+    }
+    av_log(s, AV_LOG_DEBUG, "DASH reopen demux initial_buffer_size = %d\n", initial_buffer_size);
+    avio_ctx_buffer  = av_malloc(initial_buffer_size);
     if (!avio_ctx_buffer ) {
         ret = AVERROR(ENOMEM);
         avformat_free_context(pls->ctx);
@@ -1966,10 +1972,10 @@ static int reopen_demux_for_component(AVFormatContext *s, struct representation 
         goto fail;
     }
     if (c->is_live) {
-        ffio_init_context(&pls->pb, avio_ctx_buffer , INITIAL_BUFFER_SIZE, 0, pls, read_data, NULL, NULL);
+        ffio_init_context(&pls->pb, avio_ctx_buffer , initial_buffer_size, 0, pls, read_data, NULL, NULL);
         pls->pb.seekable = 0;
     } else {
-        ffio_init_context(&pls->pb, avio_ctx_buffer , INITIAL_BUFFER_SIZE, 0, pls, read_data, NULL, seek_data);
+        ffio_init_context(&pls->pb, avio_ctx_buffer , initial_buffer_size, 0, pls, read_data, NULL, seek_data);
         pls->pb.seekable = pls->n_fragments == 1 ? AVIO_SEEKABLE_NORMAL : 0;
     }
 
@@ -2349,6 +2355,8 @@ static const AVOption dash_options[] = {
         OFFSET(prefer_period_index), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, FLAGS},
     {"merge-period", "merge other period's segment to first period",
         OFFSET(merge_period), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS},
+    {"initial-buffer-size", "initial buffer size",
+        OFFSET(initial_buffer_size), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     {NULL}
 };
 

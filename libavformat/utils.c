@@ -3601,6 +3601,7 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
     int64_t max_stream_analyze_duration;
     int64_t max_subtitle_analyze_duration;
     int64_t probesize = ic->probesize;
+    int64_t enlarge_probesize = FFMAX(ic->enlarge_probesize, 350000);
     int eof_reached = 0;
     int *missing_streams = av_opt_ptr(ic->iformat->priv_class, ic->priv_data, "missing_streams");
     int has_enlarged = 0;
@@ -3866,9 +3867,9 @@ FF_ENABLE_DEPRECATION_WARNINGS
             }
         }
         // if we did not get at least 1 video and 1 audio, enlarge the probesize and try one more times
-        if (ic->live_quick_start && read_size >= probesize && has_enlarged == 0 && (STATE_GET(video_index) == 0 || streams_decode_state == (0x01 << video_index))) {
-            av_log(ic, AV_LOG_INFO, "enlarge probesize to find more stream info read&probe is %"PRId64", %"PRId64"",read_size, probesize);
-            probesize += 350000;
+        if (ic->live_quick_start && read_size >= probesize && has_enlarged == 0 && (STATE_GET(video_index) == 0)) {
+            av_log(ic, AV_LOG_INFO, "enlarge probesize to find more stream info read&probe&enlarge is %"PRId64", %"PRId64", %"PRId64"\n", read_size, probesize, enlarge_probesize);
+            probesize += enlarge_probesize;
             has_enlarged = 1;
         }
         /* We did not get all the codec info, but we read too much data. */
@@ -4019,12 +4020,12 @@ FF_ENABLE_DEPRECATION_WARNINGS
          * least one frame of codec data, this makes sure the codec initializes
          * the channel configuration and does not only trust the values from
          * the container. */
-        if (ic->live_quick_start) {
+        if (ic->live_quick_start || ic->drm_source) {
             int index = pkt->stream_index;
             if (STATE_GET(index) == 0 &&(pkt->flags& AV_PKT_FLAG_KEY)) {
                 int nextstate = 1;
-                // only decode audio
-                if (pkt->stream_index != video_index) {
+                // only decode audio and nondrm
+                if (pkt->stream_index != video_index && !ic->drm_source) {
                     nextstate = try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL) > 0 ? 1 : 0;
                 }
                 if(nextstate) {
