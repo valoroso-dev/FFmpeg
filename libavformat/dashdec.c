@@ -34,6 +34,7 @@ struct fragment {
     int64_t url_offset;
     int64_t size;
     char *url;
+    int64_t starttime_offset;
 };
 
 /*
@@ -65,6 +66,10 @@ struct timeline {
      * specifies the Segment duration, in units of the value of the @timescale.
      * */
     int64_t duration;
+    /* timeoffset: Custom Element
+     * specifies the start time offset from previous period, in units of the value of the @timescale.
+     * */
+    int64_t starttimeoffset;
 };
 
 /*
@@ -153,6 +158,8 @@ typedef struct DASHContext {
     int prefer_period_index;
     int merge_period;
     int initial_buffer_size;
+    int ideal_variant_index;
+    int first_variant_only;
 } DASHContext;
 
 static int ishttp(char *url)
@@ -1039,9 +1046,11 @@ static int parse_manifest_representation(AVFormatContext *s, const char *url,
 
             if (type == AVMEDIA_TYPE_VIDEO) {
                 rep->rep_idx = video_rep_idx;
+                rep->type = AVMEDIA_TYPE_VIDEO;
                 dynarray_add(&c->videos, &c->n_videos, rep);
             } else {
                 rep->rep_idx = audio_rep_idx;
+                rep->type = AVMEDIA_TYPE_AUDIO;
                 dynarray_add(&c->audios, &c->n_audios, rep);
             }
         }
@@ -1186,11 +1195,26 @@ static int parse_segment_timeline_from_period(AVFormatContext *s, const char *ur
     return (got_audio || got_video) ? 0 : -1;
 }
 
+static int64_t get_period_startime_offset(struct representation *rep1, struct representation *rep2)
+{
+    struct timeline *tml1, *tml2;
+    if (!rep1 || rep1->n_timelines <= 0 || !rep2 || rep2->n_timelines <= 0) {
+        return 0;
+    }
+    tml1 = rep1->timelines[rep1->n_timelines - 1];
+    tml2 = rep2->timelines[0];
+    if (tml1->starttime > tml2->starttime && tml2->starttime < tml2->duration) {
+        return tml1->starttime;
+    }
+    return 0;
+}
+
 static int merge_manifest_period(AVFormatContext *s, const char *url, xmlNodePtr node)
 {
     DASHContext *c = s->priv_data;
     struct representation *target_audio_rep = NULL;
     struct representation *target_video_rep = NULL;
+    int64_t start_time_offset = 0;
     int ret, i;
 
     ret = parse_segment_timeline_from_period(s, url, &target_audio_rep, &target_video_rep, node);
@@ -1198,7 +1222,8 @@ static int merge_manifest_period(AVFormatContext *s, const char *url, xmlNodePtr
         return ret;
     }
     if (target_audio_rep && c->n_audios > 0 && c->audios[0]->n_timelines > 0) {
-        av_log(s, AV_LOG_DEBUG, "merge period by append %d audio segment\n", target_audio_rep->n_timelines);
+        start_time_offset = get_period_startime_offset(c->audios[0], target_audio_rep);
+        av_log(s, AV_LOG_DEBUG, "merge period by append %d audio segment, offset:%"PRId64"\n", target_audio_rep->n_timelines, start_time_offset);
         for (i = 0; i < target_audio_rep->n_timelines; i++) {
             struct timeline *tml = av_mallocz(sizeof(struct timeline));
             if (!tml) {
@@ -1206,14 +1231,16 @@ static int merge_manifest_period(AVFormatContext *s, const char *url, xmlNodePtr
             }
             tml->duration = target_audio_rep->timelines[i]->duration;
             tml->repeat = target_audio_rep->timelines[i]->repeat;
-            tml->starttime = target_audio_rep->timelines[i]->starttime;
+            tml->starttime = target_audio_rep->timelines[i]->starttime + start_time_offset;
+            tml->starttimeoffset = start_time_offset;
             av_log(s, AV_LOG_VERBOSE, "merge period by append audio segment %"PRId64"\n", tml->starttime);
             dynarray_add(&c->audios[0]->timelines, &c->audios[0]->n_timelines, tml);
         }
         free_representation(target_audio_rep);
     }
     if (target_video_rep && c->n_videos > 0 && c->videos[0]->n_timelines > 0) {
-        av_log(s, AV_LOG_DEBUG, "merge period by append %d video segment\n", target_video_rep->n_timelines);
+        start_time_offset = get_period_startime_offset(c->videos[0], target_video_rep);
+        av_log(s, AV_LOG_DEBUG, "merge period by append %d video segment, offset:%"PRId64"\n", target_video_rep->n_timelines, start_time_offset);
         for (i = 0; i < target_video_rep->n_timelines; i++) {
             struct timeline *tml = av_mallocz(sizeof(struct timeline));
             if (!tml) {
@@ -1221,7 +1248,8 @@ static int merge_manifest_period(AVFormatContext *s, const char *url, xmlNodePtr
             }
             tml->duration = target_video_rep->timelines[i]->duration;
             tml->repeat = target_video_rep->timelines[i]->repeat;
-            tml->starttime = target_video_rep->timelines[i]->starttime;
+            tml->starttime = target_video_rep->timelines[i]->starttime + start_time_offset;
+            tml->starttimeoffset = start_time_offset;
             av_log(s, AV_LOG_VERBOSE, "merge period by append video segment %"PRId64"\n", tml->starttime);
             dynarray_add(&c->videos[0]->timelines, &c->videos[0]->n_timelines, tml);
         }
@@ -1689,6 +1717,7 @@ static struct fragment *get_current_fragment(struct representation *pls)
         }
     }
     if (seg) {
+        int timeline_index = pls->cur_seq_no - pls->first_seq_no;
         char *tmpfilename= av_mallocz(c->max_url_size);
         if (!tmpfilename) {
             return NULL;
@@ -1706,6 +1735,11 @@ static struct fragment *get_current_fragment(struct representation *pls)
         }
         av_free(tmpfilename);
         seg->size = -1;
+        if (timeline_index >= 0 && timeline_index < pls->n_timelines) {
+            seg->starttime_offset = pls->timelines[timeline_index]->starttimeoffset;
+        } else {
+            seg->starttime_offset = 0;
+        }
     }
 
     return seg;
@@ -1889,8 +1923,14 @@ restart:
         goto end;
 
     if (c->is_live || v->cur_seq_no < v->last_seq_no) {
-        if (!v->is_restart_needed)
+        if (!v->is_restart_needed) {
             v->cur_seq_no++;
+            if (v->type == AVMEDIA_TYPE_VIDEO) {
+                int ideal_program = ff_check_interrupt(&v->parent->select_program_callback);
+                if (ideal_program > 0)
+                    c->ideal_variant_index = ideal_program;
+            }
+        }
         v->is_restart_needed = 1;
     }
 
@@ -2018,13 +2058,13 @@ fail:
     return ret;
 }
 
-static int open_demux_for_component(AVFormatContext *s, struct representation *pls)
+static int open_demux_for_component(AVFormatContext *s, struct representation *pls, int64_t seq_no)
 {
     int ret = 0;
     int i;
 
     pls->parent = s;
-    pls->cur_seq_no  = calc_cur_seg_no(s, pls);
+    pls->cur_seq_no  = seq_no >= 0 ? seq_no : calc_cur_seg_no(s, pls);
 
     if (!pls->last_seq_no) {
         pls->last_seq_no = calc_max_seg_no(pls, s->priv_data);
@@ -2051,15 +2091,19 @@ fail:
     return ret;
 }
 
-static int dash_read_header(AVFormatContext *s)
+static int dash_read_header(AVFormatContext *s, AVDictionary **options)
 {
     void *u = (s->flags & AVFMT_FLAG_CUSTOM_IO) ? NULL : s->pb;
     DASHContext *c = s->priv_data;
     int ret = 0;
     int stream_index = 0;
-    int i;
+    int i, j;
 
     c->interrupt_callback = &s->interrupt_callback;
+
+    if (options && *options)
+        av_dict_copy(&c->avio_opts, *options, 0);
+
     // if the URL context is good, read important options we must broker later
     if (u) {
         update_options(&c->user_agent, "user-agent", u);
@@ -2088,16 +2132,19 @@ static int dash_read_header(AVFormatContext *s)
     /* Open the demuxer for video and audio components if available */
     for (i = 0; i < c->n_videos; i++) {
         struct representation *cur_video = c->videos[i];
-        ret = open_demux_for_component(s, cur_video);
+        ret = open_demux_for_component(s, cur_video, -1);
         if (ret)
             goto fail;
         cur_video->stream_index = stream_index;
         ++stream_index;
+        if (c->first_variant_only) {
+            break;
+        }
     }
 
     for (i = 0; i < c->n_audios; i++) {
         struct representation *cur_audio = c->audios[i];
-        ret = open_demux_for_component(s, cur_audio);
+        ret = open_demux_for_component(s, cur_audio, -1);
         if (ret)
             goto fail;
         cur_audio->stream_index = stream_index;
@@ -2112,15 +2159,21 @@ static int dash_read_header(AVFormatContext *s)
     /* Create a program */
     if (!ret) {
         AVProgram *program;
-        program = av_new_program(s, 0);
-        if (!program) {
-            goto fail;
-        }
 
         for (i = 0; i < c->n_videos; i++) {
             struct representation *pls = c->videos[i];
 
-            av_program_add_stream_index(s, 0, pls->stream_index);
+            program = av_new_program(s, i);
+            if (!program) {
+                goto fail;
+            }
+            if (pls->bandwidth > 0)
+                av_dict_set_int(&program->metadata, "variant_bitrate", pls->bandwidth, 0);
+
+            if (!pls->parent) {
+                continue;
+            }
+            av_program_add_stream_index(s, i, pls->stream_index);
             pls->assoc_stream = s->streams[pls->stream_index];
             if (pls->bandwidth > 0)
                 av_dict_set_int(&pls->assoc_stream->metadata, "variant_bitrate", pls->bandwidth, 0);
@@ -2130,7 +2183,8 @@ static int dash_read_header(AVFormatContext *s)
         for (i = 0; i < c->n_audios; i++) {
             struct representation *pls = c->audios[i];
 
-            av_program_add_stream_index(s, 0, pls->stream_index);
+            for (j = 0; j < c->n_videos; j++)
+                av_program_add_stream_index(s, j, pls->stream_index);
             pls->assoc_stream = s->streams[pls->stream_index];
             if (pls->bandwidth > 0)
                 av_dict_set_int(&pls->assoc_stream->metadata, "variant_bitrate", pls->bandwidth, 0);
@@ -2150,8 +2204,12 @@ static void recheck_discard_flags(AVFormatContext *s, struct representation **p,
 
     for (i = 0; i < n; i++) {
         struct representation *pls = p[i];
-
-        int needed = !pls->assoc_stream || pls->assoc_stream->discard < AVDISCARD_ALL;
+        int needed = 0;
+        if (!pls->parent) {
+            needed = 0;
+        } else {
+            needed = !pls->assoc_stream || pls->assoc_stream->discard < AVDISCARD_ALL;
+        }
         if (needed && !pls->ctx) {
             pls->cur_seg_offset = 0;
             pls->init_sec_buf_read_offset = 0;
@@ -2176,6 +2234,8 @@ static int dash_read_packet(AVFormatContext *s, AVPacket *pkt)
     int ret = 0, i;
     int64_t mints = 0;
     struct representation *cur = NULL;
+
+restart:
 
     recheck_discard_flags(s, c->videos, c->n_videos);
     recheck_discard_flags(s, c->audios, c->n_audios);
@@ -2205,12 +2265,40 @@ static int dash_read_packet(AVFormatContext *s, AVPacket *pkt)
     while (!ff_check_interrupt(c->interrupt_callback) && !ret) {
         ret = av_read_frame(cur->ctx, pkt);
         if (ret >= 0) {
+            int64_t starttime_offset = cur->cur_seg->starttime_offset;
             /* If we got a packet, return it */
             cur->cur_timestamp = av_rescale(pkt->pts, (int64_t)cur->ctx->streams[0]->time_base.num * 90000, cur->ctx->streams[0]->time_base.den);
             pkt->stream_index = cur->stream_index;
+            if (pkt->dts < starttime_offset) {
+                pkt->pts += starttime_offset;
+                pkt->dts += starttime_offset;
+            }
             return 0;
         }
         if (cur->is_restart_needed) {
+            if (c->ideal_variant_index > 0) {
+                int variant_index = c->ideal_variant_index - 1;
+                struct representation *new_video = c->videos[variant_index];
+                c->ideal_variant_index = 0;
+                if (!new_video->parent) {
+                    ret = open_demux_for_component(s, new_video, cur->cur_seq_no);
+                    if (ret)
+                        return ret;
+                    new_video->stream_index = s->nb_streams - 1;
+                    av_program_add_stream_index(s, variant_index, new_video->stream_index);
+                    new_video->assoc_stream = s->streams[new_video->stream_index];
+                    if (new_video->bandwidth > 0)
+                        av_dict_set_int(&new_video->assoc_stream->metadata, "variant_bitrate", new_video->bandwidth, 0);
+                    if (new_video->id[0])
+                        av_dict_set(&new_video->assoc_stream->metadata, "id", new_video->id, 0);
+                } else {
+                    ret = 0;
+                }
+                ff_check_interrupt(&cur->parent->switch_stream_callback);
+                cur->is_restart_needed = 0;
+                goto restart;
+            }
+
             cur->cur_seg_offset = 0;
             cur->init_sec_buf_read_offset = 0;
             if (cur->input)
@@ -2357,6 +2445,8 @@ static const AVOption dash_options[] = {
         OFFSET(merge_period), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS},
     {"initial-buffer-size", "initial buffer size",
         OFFSET(initial_buffer_size), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
+    {"first_variant_only", "only open first variant to make startup faster",
+        OFFSET(first_variant_only), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS},
     {NULL}
 };
 
@@ -2373,7 +2463,7 @@ AVInputFormat ff_dash_demuxer = {
     .priv_class     = &dash_class,
     .priv_data_size = sizeof(DASHContext),
     .read_probe     = dash_probe,
-    .read_header    = dash_read_header,
+    .read_header2   = dash_read_header,
     .read_packet    = dash_read_packet,
     .read_close     = dash_close,
     .read_seek      = dash_read_seek,

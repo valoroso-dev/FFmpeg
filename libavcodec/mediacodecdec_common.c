@@ -340,7 +340,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
     frame->pkt_dts = AV_NOPTS_VALUE;
 
     if (avctx->codec_type == AVMEDIA_TYPE_AUDIO) {
-    av_log(avctx, AV_LOG_DEBUG,
+    av_log(avctx, AV_LOG_TRACE,
             "Frame: sample_rate=%d channels=%d format=%d\n" , s->sample_rate, s->channel_count, frame->format);
         ff_mediacodec_sw_buffer_copy_audio(avctx, s, data, size, info, frame);
     } else {

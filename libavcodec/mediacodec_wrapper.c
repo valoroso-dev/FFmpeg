@@ -1557,10 +1557,10 @@ int ff_AMediaCodec_queueSecureInputBuffer(FFAMediaCodec* codec, size_t idx, off_
         (*env)->CallVoidMethod(env, crypto_info, codec->jfields.method_CryptoInfo_setPattern, crypto_pattern);
     }
 
-    if (av_log_get_level() <= AV_LOG_DEBUG) {
+    if (av_log_get_level() <= AV_LOG_VERBOSE) {
         cryptoInfoString = (*env)->CallObjectMethod(env, crypto_info, codec->jfields.method_CryptoInfo_toString);
         c_str = (*env)->GetStringUTFChars(env, cryptoInfoString, NULL);
-        av_log(NULL, AV_LOG_DEBUG, "ff_AMediaCodec_queueSecureInputBuffer cryptoInfoString: '%s'", c_str);
+        av_log(NULL, AV_LOG_VERBOSE, "ff_AMediaCodec_queueSecureInputBuffer cryptoInfoString: '%s'", c_str);
         (*env)->ReleaseStringUTFChars(env, cryptoInfoString, c_str);
         (*env)->DeleteLocalRef(env, cryptoInfoString);
     }

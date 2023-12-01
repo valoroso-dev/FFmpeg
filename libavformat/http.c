@@ -52,7 +52,11 @@
 #define HTTP_MUTLI    2
 #define MAX_EXPIRY    19
 #define WHITESPACES " \n\t\r"
+#if defined(__ANDROID__) || defined(__APPLE__)
+#define CONFIG_ENABLE_DUMP_FILE 1
+#else
 #define CONFIG_ENABLE_DUMP_FILE 0
+#endif
 typedef enum {
     LOWER_PROTO,
     READ_HEADERS,
@@ -265,12 +269,24 @@ static int http_open_cnx_internal(URLContext *h, AVDictionary **options)
         return err;
 
 #if CONFIG_ENABLE_DUMP_FILE
-    if (s->enable_dump_file) {
-        mkdir("/sdcard/ffmpeg_dump", 0755);
-        char dump_path[256];
-        sprintf(dump_path, "/sdcard/ffmpeg_dump/%s", av_basename(path));
-        remove(dump_path);
-        s->dump_file = fopen(dump_path, "w");
+    if (s->enable_dump_file == 9981) {
+        const char *dump_root_path = av_log_get_dump_root();
+        if (access(dump_root_path, 0) != 0) {
+            if (mkdir(dump_root_path, 0755) == 0)
+                av_log(NULL, AV_LOG_DEBUG, "create ffmpeg_dump folder\n");
+        }
+        if (access(dump_root_path, 2) == 0) {
+            char dump_path[256];
+            sprintf(dump_path, "%s/%s", dump_root_path, av_basename(path));
+            remove(dump_path);
+            s->dump_file = fopen(dump_path, "w");
+            if (s->dump_file)
+                av_log(NULL, AV_LOG_DEBUG, "create ffmpeg_dump file %s\n", dump_path);
+            else
+                av_log(NULL, AV_LOG_WARNING, "fail to create ffmpeg_dump file %s\n", dump_path);
+        } else {
+            av_log(NULL, AV_LOG_WARNING, "has no access into ffmpeg_dump\n");
+        }
     }
 #endif /* CONFIG_ENABLE_DUMP_FILE */
 
@@ -380,7 +396,9 @@ int ff_http_do_new_request(URLContext *h, const char *uri)
         return AVERROR(ENOMEM);
 
     av_log(s, AV_LOG_INFO, "Opening \'%s\' for %s\n", uri, h->flags & AVIO_FLAG_WRITE ? "writing" : "reading");
+    av_application_will_http_open(s->app_ctx, (void*)h, uri);
     ret = http_open_cnx(h, &options);
+    av_application_did_http_open(s->app_ctx, (void*)h, uri, ret, s->http_code, s->filesize);
     av_dict_free(&options);
     return ret;
 }
@@ -1632,14 +1650,22 @@ static int http_read(URLContext *h, uint8_t *buf, int size)
     }
 
     size = http_read_stream(h, buf, size);
-    if (size > 0)
+    if (size > 0) {
         s->icy_data_read += size;
+        if (s->off == s->filesize && s->filesize > 0) {
+            av_application_did_http_read_end(s->app_ctx, (void*)h, s->location, s->filesize);
+        }
+
 #if CONFIG_ENABLE_DUMP_FILE
-    if (s->enable_dump_file) {
-        if (size > 0)
-            fwrite(buf, 1, size, s->dump_file);
-    }
+        if (s->enable_dump_file == 9981) {
+            if (s->dump_file) {
+                fwrite(buf, 1, size, s->dump_file);
+                if (s->off == s->filesize && s->filesize > 0)
+                    fclose(s->dump_file);
+            }
+        }
 #endif /* CONFIG_ENABLE_DUMP_FILE */
+    }
     return size;
 }
 
@@ -1704,11 +1730,6 @@ static int http_close(URLContext *h)
     if (s->hd)
         ffurl_closep(&s->hd);
     av_dict_free(&s->chained_options);
-#if CONFIG_ENABLE_DUMP_FILE
-    if (s->enable_dump_file) {
-        fclose(s->dump_file);
-    }
-#endif
     return ret;
 }
 

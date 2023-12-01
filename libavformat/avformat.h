@@ -1938,6 +1938,8 @@ typedef struct AVFormatContext {
     void* owner;
     AVIOInterruptCB drm_update_callback;
     int drm_source;
+    AVIOInterruptCB select_program_callback;
+    AVIOInterruptCB switch_stream_callback;
 } AVFormatContext;
 
 #if FF_API_FORMAT_GET_SET

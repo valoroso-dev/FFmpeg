@@ -223,6 +223,8 @@ typedef struct HLSContext {
 
     int handle_discontinuity;
     int copy_substream_metadata;
+    int ideal_variant_index;
+    int first_variant_only;
 } HLSContext;
 
 static void free_segment_list(struct playlist *pls)
@@ -1422,6 +1424,9 @@ static int playlist_needed(struct playlist *pls)
     int stream_needed = 0;
     int first_st;
 
+    if (!s)
+        return 0;
+
     /* If there is no context or streams yet, the playlist is needed */
     if (!pls->ctx || !pls->n_main_streams)
         return 1;
@@ -1469,6 +1474,7 @@ static int read_data(void *opaque, uint8_t *buf, int buf_size)
     int just_opened = 0;
     int reload_count = 0;
     struct segment *seg;
+    int seq_no_diff = 0;
 
 restart:
     if (!v->needed)
@@ -1610,7 +1616,21 @@ reload:
     }
     v->cur_seq_no++;
 
+    seq_no_diff = v->cur_seq_no - c->cur_seq_no;
+
     c->cur_seq_no = v->cur_seq_no;
+
+    if (c->ideal_variant_index > 0) {
+        return AVERROR_EOF;
+    }
+
+    if (seq_no_diff == 1) {
+        int ideal_program = ff_check_interrupt(&v->parent->select_program_callback);
+        if (ideal_program > 0) {
+            c->ideal_variant_index = ideal_program;
+            return AVERROR_EOF;
+        }
+    }
 
     goto restart;
 }
@@ -1887,7 +1907,7 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
 {
     void *u = (s->flags & AVFMT_FLAG_CUSTOM_IO) ? NULL : s->pb;
     HLSContext *c = s->priv_data;
-    int ret = 0, i;
+    int ret = 0, i, j;
     int highest_cur_seq_no = 0;
 
     c->ctx                = s;
@@ -1995,6 +2015,18 @@ static int hls_read_header(AVFormatContext *s, AVDictionary **options)
         char *url;
         AVDictionary *in_fmt_opts = NULL;
         AVDictionaryEntry *sub_entry = NULL;
+
+        if (c->first_variant_only) {
+            int in_first_variant = 0;
+            for (j = 0; j < c->variants[0]->n_playlists; j++) {
+                if (c->variants[0]->playlists[j] == pls) {
+                    in_first_variant = 1;
+                }
+            }
+            if (!in_first_variant) {
+                continue;
+            }
+        }
 
         if (!(pls->ctx = avformat_alloc_context())) {
             ret = AVERROR(ENOMEM);
@@ -2107,13 +2139,17 @@ fail:
     return ret;
 }
 
-static int reopen_demux_for_component(AVFormatContext *s, struct playlist *pls)
+static int reopen_demux_for_component(AVFormatContext *s, struct playlist *pls, int index)
 {
+    HLSContext *c = s->priv_data;
     AVInputFormat *in_fmt = NULL;
+    char *url;
+    AVDictionary *in_fmt_opts = NULL;
+    AVDictionaryEntry *sub_entry = NULL;
     struct segment *seg;
     int ret = 0;
 
-    av_log(s, AV_LOG_ERROR, "start reopen_demux_for_component pls index %d\n", pls->index);
+    av_log(s, AV_LOG_WARNING, "start reopen demux for component pls index %d-->%d, segment:%d\n", pls->index, index, pls->cur_seq_no);
 
     if (pls->ctx) {
         /* note: the internal buffer could have changed, and be != pls->read_buffer */
@@ -2122,15 +2158,23 @@ static int reopen_demux_for_component(AVFormatContext *s, struct playlist *pls)
         pls->ctx->pb = NULL;
         avformat_close_input(&pls->ctx);
         pls->ctx = NULL;
-    } else {
+    } else if (index < 0) {
         return 0;
     }
+
     if (!(pls->ctx = avformat_alloc_context())) {
         ret = AVERROR(ENOMEM);
         goto fail;
     }
+
     if (pls->n_segments == 0)
-        return 0;
+        goto fail;
+
+    if (index >= 0) {
+        pls->index  = index;
+        pls->needed = 1;
+        pls->parent = s;
+    }
 
     pls->read_buffer = av_malloc(INITIAL_BUFFER_SIZE);
     if (!pls->read_buffer){
@@ -2144,28 +2188,78 @@ static int reopen_demux_for_component(AVFormatContext *s, struct playlist *pls)
     pls->pb.seekable = 0;
     pls->cur_init_section = NULL;
     seg = current_segment(pls);
-    ret = av_probe_input_buffer(&pls->pb, &in_fmt, seg->url,
-                                NULL, 0, 0);
+    url = av_strdup(seg->url);
+    ret = av_probe_input_buffer(&pls->pb, &in_fmt, url, NULL, 0, 0);
+    av_free(url);
     if (ret < 0) {
         av_log(s, AV_LOG_ERROR, "Error when loading first segment '%s'\n", seg->url);
         avformat_free_context(pls->ctx);
         pls->ctx = NULL;
         goto fail;
     }
-    pls->ctx->pb = &pls->pb;
+    pls->ctx->pb       = &pls->pb;
     pls->ctx->io_open  = nested_io_open;
     pls->ctx->flags   |= s->flags & ~AVFMT_FLAG_CUSTOM_IO;
+
     if ((ret = ff_copy_whiteblacklists(pls->ctx, s)) < 0)
         goto fail;
 
-    ret = avformat_open_input(&pls->ctx, seg->url, in_fmt, NULL);
+    if ((sub_entry = av_dict_get(c->avio_opts, "max_retry_times", NULL, 0))) {
+        av_dict_set(&in_fmt_opts, "max_retry_times", sub_entry->value, 0);
+    }
+    ret = avformat_open_input(&pls->ctx, seg->url, in_fmt, &in_fmt_opts);
     if (ret < 0)
         goto fail;
+
     ret = avformat_find_stream_info(pls->ctx, NULL);
     if (ret < 0)
         goto fail;
 
+    if (index >= 0) {
+        if (pls->id3_deferred_extra && pls->ctx->nb_streams == 1) {
+            ff_id3v2_parse_apic(pls->ctx, &pls->id3_deferred_extra);
+            avformat_queue_attached_pictures(pls->ctx);
+            ff_id3v2_parse_priv(pls->ctx, &pls->id3_deferred_extra);
+            ff_id3v2_free_extra_meta(&pls->id3_deferred_extra);
+            pls->id3_deferred_extra = NULL;
+        }
+
+        if (pls->is_id3_timestamped == -1)
+            av_log(s, AV_LOG_WARNING, "No expected HTTP requests have been made\n");
+
+        /*
+        * For ID3 timestamped raw audio streams we need to detect the packet
+        * durations to calculate timestamps in fill_timing_for_id3_timestamped_stream(),
+        * but for other streams we can rely on our user calling avformat_find_stream_info()
+        * on us if they want to.
+        */
+        if (pls->is_id3_timestamped) {
+            ret = avformat_find_stream_info(pls->ctx, NULL);
+            if (ret < 0)
+                goto fail;
+        }
+
+        pls->has_noheader_flag = !!(pls->ctx->ctx_flags & AVFMTCTX_NOHEADER);
+
+        /* Create new AVStreams for each stream in this playlist */
+        ret = update_streams_from_subdemuxer(s, pls);
+        if (ret < 0)
+            goto fail;
+
+        /*
+        * Copy any metadata from playlist to main streams, but do not set
+        * event flags.
+        */
+        if (pls->n_main_streams)
+            av_dict_copy(&pls->main_streams[0]->metadata, pls->ctx->metadata, 0);
+
+        add_metadata_from_renditions(s, pls, AVMEDIA_TYPE_AUDIO);
+        add_metadata_from_renditions(s, pls, AVMEDIA_TYPE_VIDEO);
+        add_metadata_from_renditions(s, pls, AVMEDIA_TYPE_SUBTITLE);
+    }
+
 fail:
+    av_log(s, AV_LOG_WARNING, "finish reopen demux for component pls index %d, ret:%d\n", pls->index, ret);
     return ret;
 }
 
@@ -2253,7 +2347,9 @@ static int compare_ts_with_wrapdetect(int64_t ts_a, struct playlist *pls_a,
 static int hls_read_packet(AVFormatContext *s, AVPacket *pkt)
 {
     HLSContext *c = s->priv_data;
-    int ret, i, minplaylist = -1;
+    int ret, i, j, k, minplaylist = -1;
+
+restart:
 
     recheck_discard_flags(s, c->first_packet);
     c->first_packet = 0;
@@ -2427,6 +2523,102 @@ static int hls_read_packet(AVFormatContext *s, AVPacket *pkt)
         }
         return 0;
     }
+    if (c->ideal_variant_index > 0) {
+        int variant_index = c->ideal_variant_index - 1;
+        struct variant *ideal_variant = c->variants[variant_index];
+        struct playlist *pls = NULL;
+        c->ideal_variant_index = 0;
+        for (i = 0; i < c->n_playlists; i++) {
+            pls = NULL;
+            for (j = 0; j < ideal_variant->n_playlists; j++) {
+                if (c->playlists[i] == ideal_variant->playlists[j]) {
+                    pls = c->playlists[i];
+                    break;
+                }
+            }
+            if (pls && !pls->ctx) {
+                if (pls->needed) {
+                    //the discard flag of this pls is not changed, so do nothing
+                } else if (!pls->finished) {
+                    while (pls->cur_seq_no < c->cur_seq_no) {
+                        pls->cur_seq_no = select_cur_seq_no(c, pls);
+                        if (ff_check_interrupt(c->interrupt_callback))
+                            return AVERROR_EXIT;
+                        av_usleep(100*1000);
+                    }
+                    if (pls->cur_seq_no < pls->start_seq_no) {
+                        pls->cur_seq_no = pls->start_seq_no;
+                    }
+                } else {
+                    pls->cur_seq_no = c->cur_seq_no;
+                }
+                if (reopen_demux_for_component(s, pls, i) < 0) {
+                    pls->needed = 0;
+                    return AVERROR_EXIT;
+                }
+                for (k = 0; k < pls->n_main_streams; k++)
+                    pls->main_streams[k]->discard = AVDISCARD_ALL;
+            }
+        }
+
+        ff_check_interrupt(&s->switch_stream_callback);
+
+        for (i = 0; i < c->n_playlists; i++) {
+            pls = c->playlists[i];
+            if (playlist_needed(pls)) {
+                int check_reopen_component = 0;
+                if (pls->needed) {
+                    //the discard flag of this pls is not changed, so do nothing
+                } else if (!pls->finished) {
+                    while (pls->cur_seq_no < c->cur_seq_no) {
+                        pls->cur_seq_no = select_cur_seq_no(c, pls);
+                        if (ff_check_interrupt(c->interrupt_callback))
+                            return AVERROR_EXIT;
+                        av_usleep(100*1000);
+                    }
+                    if (pls->cur_seq_no < pls->start_seq_no) {
+                        pls->cur_seq_no = pls->start_seq_no;
+                    }
+                } else {
+                    pls->cur_seq_no = c->cur_seq_no;
+                }
+                if (pls->pb.eof_reached) {
+                    pls->pb.eof_reached = 0;
+                    check_reopen_component = 1;
+                } else if (!pls->needed) {
+                    check_reopen_component = 1;
+                }
+                if (check_reopen_component) {
+                    if (pls->ctx->iformat && !strcmp(pls->ctx->iformat->name, "mov,mp4,m4a,3gp,3g2,mj2")) {
+                        pls->needed = 1;
+                        if (c->cur_timestamp != AV_NOPTS_VALUE) {
+                            /* catch up */
+                            pls->seek_timestamp = c->cur_timestamp;
+                            pls->seek_flags = AVSEEK_FLAG_ANY;
+                            pls->seek_stream_index = -1;
+                        }
+                        if (!pls->finished) {
+                            while (pls->cur_seq_no >= pls->start_seq_no + pls->n_segments) {
+                                if (av_gettime_relative() - pls->last_load_time >= default_reload_interval(pls))
+                                    parse_playlist(c, pls->url, pls, NULL);
+                                if (pls->cur_seq_no < pls->start_seq_no + pls->n_segments)
+                                    break;
+
+                                if (ff_check_interrupt(c->interrupt_callback))
+                                    return AVERROR_EXIT;
+                                av_usleep(100*1000);
+                            }
+                        }
+                        if (reopen_demux_for_component(s, pls, -1) < 0)
+                            return AVERROR_EXIT;
+                    }
+                }
+            } else {
+                pls->needed = 0;
+            }
+        }
+        goto restart;
+    }
     return AVERROR_EOF;
 }
 
@@ -2485,6 +2677,9 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
     for (i = 0; i < c->n_playlists; i++) {
         /* Reset reading */
         struct playlist *pls = c->playlists[i];
+        if (!pls->ctx) {
+            continue;
+        }
         if (pls->input)
             ff_format_io_close(pls->parent, &pls->input);
         pls->input_read_done = 0;
@@ -2513,8 +2708,8 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
             pls->seek_stream_index = -1;
             pls->seek_flags |= AVSEEK_FLAG_ANY;
         }
-        if (pls->ctx->iformat && !strcmp(pls->ctx->iformat->name, "mov,mp4,m4a,3gp,3g2,mj2")) {
-            reopen_demux_for_component(s, pls);
+        if (pls->needed && pls->ctx->iformat && !strcmp(pls->ctx->iformat->name, "mov,mp4,m4a,3gp,3g2,mj2")) {
+            reopen_demux_for_component(s, pls, -1);
         }
     }
 
@@ -2560,6 +2755,8 @@ static const AVOption hls_options[] = {
         OFFSET(handle_discontinuity), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, FLAGS},
     {"copy_substream_metadata", "copy substream metadata to hls stream",
         OFFSET(copy_substream_metadata), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS},
+    {"first_variant_only", "only open first variant to make startup faster",
+        OFFSET(first_variant_only), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS},
     {NULL}
 };
 

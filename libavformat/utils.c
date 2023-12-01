@@ -4022,7 +4022,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
          * the container. */
         if (ic->live_quick_start || ic->drm_source) {
             int index = pkt->stream_index;
-            if (STATE_GET(index) == 0 &&(pkt->flags& AV_PKT_FLAG_KEY)) {
+            if (STATE_GET(index) == 0 && (pkt->flags & AV_PKT_FLAG_KEY)) {
                 int nextstate = 1;
                 // only decode audio and nondrm
                 if (pkt->stream_index != video_index && !ic->drm_source) {
@@ -4035,6 +4035,9 @@ FF_ENABLE_DEPRECATION_WARNINGS
             }
         } else {
             try_decode_frame(ic, st, pkt,(options && i < orig_nb_streams) ? &options[i] : NULL);
+            if (STATE_GET(pkt->stream_index) == 0) {
+                STATE_SET(pkt->stream_index, st->codecpar->codec_type);
+            }
         }
 
         if (ic->flags & AVFMT_FLAG_NOBUFFER)

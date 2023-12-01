@@ -27,6 +27,7 @@
 #define AVAPP_EVENT_DID_HTTP_OPEN   2 //AVAppHttpEvent
 #define AVAPP_EVENT_WILL_HTTP_SEEK  3 //AVAppHttpEvent
 #define AVAPP_EVENT_DID_HTTP_SEEK   4 //AVAppHttpEvent
+#define AVAPP_EVENT_DID_HTTP_READ_END 5 //AVAppHttpEvent
 
 #define AVAPP_EVENT_ASYNC_STATISTIC     0x11000 //AVAppAsyncStatistic
 #define AVAPP_EVENT_ASYNC_READ_SPEED    0x11001 //AVAppAsyncReadSpeed
@@ -106,6 +107,7 @@ void av_application_will_http_open(AVApplicationContext *h, void *obj, const cha
 void av_application_did_http_open(AVApplicationContext *h, void *obj, const char *url, int error, int http_code, int64_t filesize);
 void av_application_will_http_seek(AVApplicationContext *h, void *obj, const char *url, int64_t offset);
 void av_application_did_http_seek(AVApplicationContext *h, void *obj, const char *url, int64_t offset, int error, int http_code);
+void av_application_did_http_read_end(AVApplicationContext *h, void *obj, const char *url, int64_t filesize);
 
 void av_application_did_io_tcp_read(AVApplicationContext *h, void *obj, int bytes);
 

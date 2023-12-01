@@ -53,6 +53,7 @@ static AVMutex mutex = AV_MUTEX_INITIALIZER;
 
 static int av_log_level = AV_LOG_INFO;
 static int flags;
+static char *av_log_dump_root = NULL;
 
 #define NB_LEVELS 8
 #if defined(_WIN32) && HAVE_SETCONSOLETEXTATTRIBUTE
@@ -400,6 +401,20 @@ int av_log_get_flags(void)
 void av_log_set_callback(void (*callback)(void*, int, const char*, va_list))
 {
     av_log_callback = callback;
+}
+
+void av_log_set_dump_root(const char* root_path) {
+    if (av_log_dump_root) {
+        av_freep(&av_log_dump_root);
+    }
+    av_log_dump_root = av_strdup(root_path);
+}
+
+const char* av_log_get_dump_root(void) {
+    if (!av_log_dump_root) {
+        av_log_dump_root = av_strdup("/sdcard/ffmpeg_dump");
+    }
+    return av_log_dump_root;
 }
 
 static void missing_feature_sample(int sample, void *avc, const char *msg,

@@ -96,6 +96,20 @@ void av_application_did_http_open(AVApplicationContext *h, void *obj, const char
     av_application_on_http_event(h, AVAPP_EVENT_DID_HTTP_OPEN, &event);
 }
 
+void av_application_did_http_read_end(AVApplicationContext *h, void *obj, const char *url, int64_t filesize)
+{
+    AVAppHttpEvent event = {0};
+
+    if (!h || !obj || !url)
+        return;
+
+    event.obj        = obj;
+    av_strlcpy(event.url, url, sizeof(event.url));
+    event.filesize  = filesize;
+
+    av_application_on_http_event(h, AVAPP_EVENT_DID_HTTP_READ_END, &event);
+}
+
 void av_application_will_http_seek(AVApplicationContext *h, void *obj, const char *url, int64_t offset)
 {
     AVAppHttpEvent event = {0};

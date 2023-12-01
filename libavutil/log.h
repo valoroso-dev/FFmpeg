@@ -355,6 +355,9 @@ int av_log_format_line2(void *ptr, int level, const char *fmt, va_list vl,
 void av_log_set_flags(int arg);
 int av_log_get_flags(void);
 
+void av_log_set_dump_root(const char* root_path);
+const char* av_log_get_dump_root(void);
+
 /**
  * @}
  */
